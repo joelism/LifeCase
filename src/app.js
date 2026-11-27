@@ -1,3 +1,4 @@
+import { briefingSnapshot, makeDailyBriefing } from './daily-briefing.js';
 import { makePlanner } from './planner.js';
 import { preparationForRow } from './planning.js';
 import { makeAssistant } from './assistant-chat.js';
@@ -44,6 +45,7 @@ const daily = makeDaily(ctx, () => connected.state.accounts);
 const assistant = makeAssistant(ctx, () => connected.state.accounts);
 const drive = makeDrive(ctx, () => connected.state.accounts, () => connected.status(true));
 const planner = makePlanner(ctx);
+const briefing = makeDailyBriefing(ctx);
 let devicePush = false;
 let noticeTimer;
 let syncVersion = 0;
@@ -100,6 +102,8 @@ function cleared() {
   connected.reset();
   daily.reset();
   assistant.reset();
+  briefing.reset();
+  lastSync = 0;
   drive.reset();
   planner.reset();
   devicePush = false;
@@ -161,7 +165,15 @@ function settings() {
       '<div class="actions">' + button('LifeCase installieren', 'install', '', 'download', 'primary') + '</div>') + '</div>');
 }
 function mainView() {
-  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, { name: profileName(state.session?.user), suggestions: daily.state.suggestions.length });
+  if (state.view === 'Übersicht') {
+    const suggestions = daily.state.suggestions.length;
+    const ready = !state.loading && !connected.state.calendarLoading && lastSync > 0;
+    const snapshot = ready ? briefingSnapshot(state.rows, connected.state.events, suggestions) : null;
+    if (snapshot) queueMicrotask(() => { if (state.verified && state.view === 'Übersicht') briefing.refresh(snapshot); });
+    return dashboard(state.rows, state.loading, connected.state, {
+      name: profileName(state.session?.user), suggestions, briefing: snapshot ? briefing.view(snapshot) : '',
+    });
+  }
   if (state.view === 'Meine Woche') return planner.view(state.rows, connected.state);
   if (state.view === 'Einkaufen') return shoppingPage(state.rows, daily.state);
   if (state.view === 'Scannen') return scanPage(state.rows);

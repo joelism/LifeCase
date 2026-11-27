@@ -190,10 +190,13 @@ export function openRecord(id, ctx) {
     (actionable ? button('Kalenderdatei', 'ics', id, 'calendar') : '');
   const tools = isAppointment ? '<div class="actions">' + plan + followUp + '</div><details class="record-extra"><summary>Weitere Aktionen</summary><div class="actions">' +
     exports + '</div></details>' : '<div class="actions">' + plan + followUp + exports + '</div>';
+  const chatOriginal = section === 'Chronik' && value(row, 'chatOriginal');
+  const originalMessage = chatOriginal ? '<details class="record-extra"><summary>Eigene Chat-Nachricht</summary><p class="mail-content">' +
+    esc(chatOriginal) + '</p></details>' : '';
   const output = '<div class="actions">' + tag(section) + (arch ? tag('Archiviert', 'amber') : '') +
     '<small>Aktualisiert am ' + esc(showTimestamp(row.updated_at || row.created_at)) + '</small></div><dl class="detail">' + fields + old + '</dl>' +
     (linked.length ? '<section><h3 class="subheading">Zugehörige Einträge</h3>' + chips(linked.map(item => item.id), rows) + '</section>' : '') +
-    attachments + original + tools + errorBox;
+    attachments + original + originalMessage + tools + errorBox;
   openDialog(calendarRecordTitle(row), output, button(arch ? 'Wiederherstellen' : 'Archivieren', 'archive-record', id, 'archive') + edit);
   dialog.dataset.recordId = id;
 }

@@ -417,3 +417,11 @@ dialog:has(.assistant-thread) .dialog-body{min-height:0;grid-template-rows:minma
  .week-grid .panel-head{padding-inline:12px}
  .week-grid .panel-head .text-button{min-height:40px}
 }
+
+.daily-briefing .panel-head h2{display:flex;align-items:center;gap:9px;color:var(--accent)}
+.daily-briefing .panel-body{display:grid;gap:12px}
+.briefing-days{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.briefing-days>div{padding:9px 11px;border-radius:12px;background:var(--blue-bg)}
+.briefing-days dt{font-weight:720}
+.briefing-days dd{margin:3px 0 0;color:var(--muted);font-size:13px}
+.briefing-alerts{color:var(--accent);font-size:13px;font-weight:620}

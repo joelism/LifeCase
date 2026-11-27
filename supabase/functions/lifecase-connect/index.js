@@ -130,7 +130,8 @@ async function askStudio(req, config, values) {
         'OAI-Sites-Authorization': 'Bearer ' + config.service_token,
         'X-LifeCase-Session': req.headers.get('authorization').slice(7),
       },
-      body: JSON.stringify({ messages: values.messages, lastDate: values.lastDate }),
+      body: JSON.stringify(values.action === 'assistant-briefing' ? { briefing: values.briefing } :
+        { messages: values.messages, lastDate: values.lastDate }),
     });
   } catch {
     throw new Failure(503, 'Die Verbindung zum OpenAI-Assistenten ist gerade unterbrochen.');
@@ -189,8 +190,8 @@ Deno.serve(async req => {
     try { values = JSON.parse(body); } catch { throw new Failure(400, 'Ungültige LifeCase-Anfrage.'); }
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Failure(400, 'Ungültige LifeCase-Anfrage.');
     const { action, provider } = values;
-    if (action === 'assistant-status' || action === 'assistant') {
-      const config = unwrap(await service.rpc('lifecase_assistant_access', { p_owner: user, p_charge: action === 'assistant' }));
+    if (['assistant-status', 'assistant', 'assistant-briefing'].includes(action)) {
+      const config = unwrap(await service.rpc('lifecase_assistant_access', { p_owner: user, p_charge: action !== 'assistant-status' }));
       if (action === 'assistant-status') return jsonify({ available: config?.available === true }, 200, headers);
       if (!config?.available) throw new Failure(409, 'OpenAI ist für dieses LifeCase-Konto noch nicht aktiviert.');
       if (config.limited) throw new Failure(429, 'Das Chatlimit für diese Stunde ist erreicht.');

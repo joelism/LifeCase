@@ -121,9 +121,9 @@ export async function findRecord(id) {
   return get(await db.from('lifecase_records').select('*').eq('id', id).single());
 }
 
-export async function saveIntakeRecord(fields) {
-  const attempt = await db.from('lifecase_records').insert({ section: 'Kalender', fields }).select().single();
+export async function saveIntakeRecord(fields, section = 'Kalender') {
+  const attempt = await db.from('lifecase_records').insert({ section, fields }).select().single();
   if (attempt.error?.code !== '23505') return get(attempt);
-  return get(await db.from('lifecase_records').select('*').eq('section', 'Kalender')
+  return get(await db.from('lifecase_records').select('*').eq('section', section)
     .eq('fields->>intakeKey', fields.intakeKey).single());
 }

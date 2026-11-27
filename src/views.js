@@ -38,7 +38,7 @@ export function shell(view, inner, state) {
     '</strong><small>Einstellungen</small></span>' + icon('settings', 16) + '</button></div></aside>' +
     '<div class="workspace"><header class="top"><div class="top-location">' + icon(sections[view].icon, 16) + esc(view) +
     '</div><div class="mobile-brand">' + brand + '</div><div class="top-actions"><button class="find" type="button" data-view="Suche" aria-label="Global suchen">' +
-    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger" data-assistant aria-label="Terminassistent">' +
+    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger" data-assistant aria-label="LifeCase-Assistent">' +
     icon('chat', 21) + '</button><button type="button" class="icon-btn notification-button" data-view="Erinnerungen" aria-label="Erinnerungen' +
     (reminders ? ', ' + reminders + ' fällig' : '') + '">' + icon('bell', 19) +
     (reminders ? '<span class="notice-count" aria-hidden="true">' + (reminders > 9 ? '9+' : reminders) + '</span>' : '') +
@@ -105,7 +105,7 @@ function shortcut(symbol, label, action, target) {
     icon(symbol, 19) + '</span><span>' + esc(label) + '</span>' + icon('right', 14) + '</button>';
 }
 
-export function dashboard(rows, loading, connected, { name = '', suggestions = 0 } = {}) {
+export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '' } = {}) {
   const day = today();
   const active = rows.filter(isActive);
   const openCases = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen').length;
@@ -142,8 +142,8 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   return '<header class="day-welcome"><div><span class="day-date">' + esc(labels.format(new Date())) +
     '</span><h1>' + esc(greeting) + '</h1></div>' +
     button('Meine Woche', 'view', 'Meine Woche', 'week', 'day-week') + '</header>' + externalStatus(connected) +
-    '<div class="dashboard-flow">' + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
-    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('chat', 'Terminassistent', 'assistant', '') +
+    '<div class="dashboard-flow">' + briefing + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('chat', 'Assistent', 'assistant', '') +
     shortcut('camera', 'Dokument scannen', 'scan-start', 'document') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
     '</nav>' + (urgent ? glance : '') + upcomingPanel + (urgent ? '' : glance) + '</div>';
 }

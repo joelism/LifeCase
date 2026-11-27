@@ -1,4 +1,5 @@
-import { archive, records, saveIntakeRecord, message, userError } from './backend.js';
+import { assistantChronicleFields, dossierEntries, findAssistantDossier } from './assistant-dossiers.js';
+import { archive, records, saveIntakeRecord, saveRecord, message, userError } from './backend.js';
 import { connection } from './connections-api.js';
 import { calendarRecordTitle, duplicateAppointment, interpretAppointment, interpretTask } from './calendar-assistant.js';
 import { displayedAgenda, expandEvents, providers } from './connected-model.js';
@@ -6,7 +7,7 @@ import { openDialog } from './editor.js';
 import { icon } from './icons.js';
 import { findLunchSlot, lunchRequest, lunchSlotIsFree } from './lunch.js';
 import { lunchLabel, shiftWorkdays } from './workday.js';
-import { nameOf, shiftDate, showDate, sha256, today } from './model.js';
+import { dateOf, nameOf, sectionOf, shiftDate, showDate, sha256, today, value } from './model.js';
 import { button, esc, options } from './ui.js';
 
 const prompts = {
@@ -33,8 +34,9 @@ export function makeAssistant(ctx, currentAccounts) {
   let pendingMessage = '';
   let aiAvailable = null;
   let aiHistory = [];
-  const add = (side, text, record = '') => { history = [...history.slice(-11), { side, text, record }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; }
+  let pendingCase = null;
+  const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; }
 
   async function agendaFor(date, strict = false) {
     const latest = currentAccounts() ?? (await connection('status').catch(() => ({}))).accounts;
@@ -121,12 +123,18 @@ export function makeAssistant(ctx, currentAccounts) {
     if (result.status !== 'ready') { add('assistant', prompts[result.status]); return; }
     await storeAppointment(result.draft, epoch);
   }
-  async function storeAppointment(candidate, epoch) {
+  async function storeAppointment(candidate, epoch, dossier = null) {
     const known = await agendaFor(candidate.date);
     if (epoch !== ctx.epoch()) return;
     const found = duplicateAppointment(known.entries, candidate);
     if (found) {
-      add('assistant', '«' + candidate.title + '» steht am ' + showDate(candidate.date) + ' um ' + candidate.time + ' bereits im Kalender.', found.row?.id);
+      const linked = dossier && found.row && Array.isArray(value(found.row, 'caseIds')) ? value(found.row, 'caseIds') : [];
+      if (dossier && found.row && !linked.includes(dossier.id)) {
+        const updated = await saveRecord('Kalender', { ...found.row.fields, caseIds: [...linked, dossier.id] }, found.row);
+        if (epoch !== ctx.epoch()) return;
+        ctx.addRecord(updated);
+        add('assistant', '«' + candidate.title + '» ist mit «' + nameOf(dossier) + '» verknüpft.', updated.id);
+      } else add('assistant', '«' + candidate.title + '» steht am ' + showDate(candidate.date) + ' um ' + candidate.time + ' bereits im Kalender.', found.row?.id);
       lastDate = candidate.date;
       draft = null;
       return;
@@ -142,16 +150,17 @@ export function makeAssistant(ctx, currentAccounts) {
     lastDate = candidate.date;
     const end = candidate.endTime ? '–' + (candidate.endDate ? showDate(candidate.endDate) + ' ' : '') + candidate.endTime : '';
     let reply = '«' + nameOf(saved) + '» eingetragen.\n' + showDate(candidate.date) + ' · ' + candidate.time + end + ' Uhr.';
+    if (dossier) reply += '\nDossier «' + nameOf(dossier) + '».';
     if (spacing === 'Knapp') reply += ' Ein anderer Termin liegt knapp daneben.';
     if (spacing === 'Überschneidung') reply += ' Der Termin überschneidet sich mit einem anderen Eintrag.';
     if (known.incomplete) reply += ' Der Abgleich mit externen Kalendern war gerade nicht vollständig.';
     add('assistant', reply, saved.id);
     draft = null;
   }
-  async function addTask(result, epoch) {
+  async function addTask(result, epoch, dossier = null) {
     if (result.status !== 'ready') { add('assistant', prompts[result.status]); return; }
     const fields = result.fields;
-    const hash = await sha256(new Blob([JSON.stringify([fields.kind, fields.date, fields.time, fields.title.toLocaleLowerCase('de-CH')])]));
+    const hash = await sha256(new Blob([JSON.stringify([fields.kind, fields.date, fields.time, fields.title.toLocaleLowerCase('de-CH'), ...(dossier ? [dossier.id] : [])])]));
     if (epoch !== ctx.epoch()) return;
     let saved = await saveIntakeRecord({ ...fields, intakeKey: 'task-chat:' + hash, intakeSource: 'Terminassistent' });
     if (epoch !== ctx.epoch()) return;
@@ -161,7 +170,7 @@ export function makeAssistant(ctx, currentAccounts) {
     if (saved.fields.status === 'Erledigt') add('assistant', '«' + nameOf(saved) + '» ist bereits als erledigt markiert.', saved.id);
     else add('assistant', '«' + nameOf(saved) + '» steht ' + (fields.date ?
       'am ' + showDate(fields.date) + (fields.time ? ' um ' + fields.time + ' Uhr' : '') + ' in deiner Planung.' :
-      'unter «Aufgaben ohne Datum» in «Meine Woche».') , saved.id);
+      'unter «Aufgaben ohne Datum» in «Meine Woche».') + (dossier ? '\nDossier «' + nameOf(dossier) + '».' : ''), saved.id);
     draft = null;
   }
   async function useOpenAI(text, epoch) {
@@ -169,6 +178,8 @@ export function makeAssistant(ctx, currentAccounts) {
     const result = await connection('assistant', { messages, lastDate });
     if (epoch !== ctx.epoch()) return;
     aiHistory = messages.slice(-7);
+    if (result.action === 'chronicle' || result.action === 'case_overview' ||
+        (result.caseQuery && ['appointment', 'task'].includes(result.action))) return resolveDossier(result, epoch);
     if (result.action === 'appointment') return storeAppointment(result.fields, epoch);
     if (result.action === 'task') return addTask({ status: 'ready', fields: result.fields }, epoch);
     if (result.action === 'lunch') return suggestLunch(result, epoch);
@@ -176,6 +187,62 @@ export function makeAssistant(ctx, currentAccounts) {
     if (result.action !== 'answer' && result.action !== 'clarify') throw userError('Die Antwort von OpenAI war nicht vollständig.');
     aiHistory = [...aiHistory, { role: 'assistant', content: result.reply.slice(0, 600) }];
     add('assistant', result.reply);
+  }
+  async function resolveDossier(intent, epoch) {
+    const latest = await records();
+    if (epoch !== ctx.epoch()) return;
+    const { match, choices, mayCreate } = findAssistantDossier(latest, intent.caseQuery);
+    if (match) return useDossier(intent, match, epoch);
+    pendingCase = { intent, choices: choices.slice(0, 8), mayCreate: mayCreate && intent.action !== 'case_overview' };
+    add('assistant', choices.length ?
+      'Welches Dossier meinst du?' :
+      mayCreate && intent.action !== 'case_overview' ? 'Das Dossier wurde nicht gefunden. Du kannst es hier anlegen.' :
+      'Ich finde hier kein passendes Dossier. Nenne mir den Dossiernamen.');
+  }
+  async function chooseDossier(id, epoch) {
+    const selection = pendingCase;
+    if (!selection) return;
+    const latest = await records();
+    if (epoch !== ctx.epoch()) return;
+    const { intent, choices, mayCreate } = selection;
+    const caseId = id === 'new' ? null : choices.find(row => row.id === id)?.id;
+    let dossier = caseId ? latest.find(row => row.id === caseId && !row.archived_at && sectionOf(row) === 'Fälle') : null;
+    if (id === 'new') {
+      if (!mayCreate) return;
+      const existing = findAssistantDossier(latest, intent.caseQuery);
+      if (existing.match) dossier = existing.match;
+      else if (existing.mayCreate) {
+        dossier = await saveRecord('Fälle', { title: intent.caseQuery, status: 'Offen', category: 'Weitere' });
+        if (epoch !== ctx.epoch()) return;
+        ctx.addRecord(dossier);
+      }
+    }
+    if (!dossier) throw userError('Dieses Dossier ist nicht mehr verfügbar.');
+    await useDossier(intent, dossier, epoch);
+  }
+  async function useDossier(intent, dossier, epoch) {
+    if (intent.action === 'case_overview') {
+      const latest = await records();
+      if (epoch !== ctx.epoch()) return;
+      const entries = dossierEntries(latest, dossier.id);
+      const recent = entries.slice(0, 6).map(row => [dateOf(row) && showDate(dateOf(row)), sectionOf(row), calendarRecordTitle(row)]
+        .filter(Boolean).join(' · '));
+      add('assistant', '«' + nameOf(dossier) + '» · ' + entries.length + (entries.length === 1 ? ' verknüpfter Eintrag' : ' verknüpfte Einträge') +
+        (recent.length ? '\n' + recent.join('\n') : ''), dossier.id, 'Dossier öffnen');
+    }
+    if (intent.action === 'chronicle') {
+      const key = await sha256(new Blob([JSON.stringify([dossier.id, intent.fields.date, intent.fields.original])]));
+      if (epoch !== ctx.epoch()) return;
+      const fields = assistantChronicleFields(intent.fields, dossier.id, key);
+      const saved = await saveIntakeRecord(fields, 'Chronik');
+      if (epoch !== ctx.epoch()) return;
+      ctx.addRecord(saved);
+      add('assistant', '«' + nameOf(saved) + '» ' + (saved.archived_at ? 'liegt im Archiv von' : 'steht in der Chronik von') +
+        ' «' + nameOf(dossier) + '».\n' + showDate(fields.date) + ' · ' + fields.source, saved.id, 'Chronikeintrag öffnen');
+    }
+    if (intent.action === 'appointment') await storeAppointment({ ...intent.fields, caseIds: [dossier.id] }, epoch, dossier);
+    if (intent.action === 'task') await addTask({ status: 'ready', fields: { ...intent.fields, caseIds: [dossier.id] } }, epoch, dossier);
+    if (epoch === ctx.epoch()) pendingCase = null;
   }
   async function showAgenda(date, epoch) {
     const result = await agendaFor(date);
@@ -190,9 +257,9 @@ export function makeAssistant(ctx, currentAccounts) {
   }
   function content() {
     const messages = history.length ? history.map(row => '<div class="assistant-bubble ' + row.side + '"><p>' + esc(row.text) + '</p>' +
-      (row.record ? button('Eintrag ansehen','open',row.record,'calendar') : '') + '</div>').join('') :
+      (row.record ? button(row.label,'open',row.record,row.label === 'Dossier öffnen' ? 'folder' : 'calendar') : '') + '</div>').join('') :
       '<div class="assistant-bubble assistant"><p>' + (aiAvailable ?
-      'Wobei kann ich dir helfen? Ich kann Termine und Aufgaben erfassen oder deinen Tag im Kalender nachschauen.' :
+      'Wobei kann ich dir helfen? Ich kann etwas in einem Dossier festhalten, Termine und Aufgaben erfassen oder deine Planung nachschauen.' :
       'Erfasse einen Termin oder eine Aufgabe oder suche eine Mittagspause.') + '</p></div>';
     const controls = !proposal ? '' :
       '<div class="assistant-tools">' +
@@ -202,13 +269,18 @@ export function makeAssistant(ctx, currentAccounts) {
         button('Andere Zeit','lunch-other','','clock') + button('Nein','lunch-cancel') + '</div></div>';
     const status = aiAvailable === null ? 'OpenAI-Verbindung wird geprüft …' :
       aiAvailable ? 'OpenAI verarbeitet die Nachrichten, die du hier absendest.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
-    return '<p class="hint assistant-running">' + status + '</p>' + messages +
+    const caseControls = !busy && pendingCase ? '<div class="assistant-tools" aria-label="Dossier auswählen">' +
+      pendingCase.choices.map(row => button(nameOf(row), 'assistant-case', row.id, 'folder')).join('') +
+      (pendingCase.mayCreate ?
+        button('Dossier «' + pendingCase.intent.caseQuery + '» anlegen', 'assistant-case', 'new', 'plus') : '') +
+      button('Abbrechen', 'assistant-case', 'cancel') + '</div>' : '';
+    return '<p class="hint assistant-running">' + status + '</p>' + messages + caseControls +
       (!busy ? controls : '<p class="hint assistant-running" role="status">Einen Moment …</p>');
   }
   function open(autoLunch = false) {
-    const dialog = openDialog('Terminassistent', '<div class="assistant-thread" aria-live="polite">' + content() + '</div>' +
+    const dialog = openDialog('LifeCase-Assistent', '<div class="assistant-thread" aria-live="polite">' + content() + '</div>' +
       '<form class="assistant-form"><button type="button" class="icon-btn" data-assistant-lunch-tool aria-label="Mittagspause finden">' + icon('sun', 20) + '</button>' +
-      '<textarea name="request" aria-label="Deine Nachricht" maxlength="500" rows="2" placeholder="Schreib mir einen Termin …" ' +
+      '<textarea name="request" aria-label="Deine Nachricht" maxlength="500" rows="2" placeholder="Was soll ich festhalten oder planen?" ' +
       'enterkeyhint="send" autocomplete="off" required>' + esc(pendingMessage) + '</textarea>' +
       '<button type="submit" class="button primary" aria-label="Nachricht senden">' +
       icon('arrow', 21) + '</button></form>');
@@ -257,6 +329,12 @@ export function makeAssistant(ctx, currentAccounts) {
     });
     thread.addEventListener('click', event => {
       const control = event.target.closest('button');
+      if (control?.hasAttribute('data-assistant-case')) {
+        const id = control.dataset.assistantCase;
+        if (id === 'cancel') { pendingCase = null; add('assistant', 'Auswahl abgebrochen.'); draw(); }
+        else run(epoch => chooseDossier(id, epoch));
+        return;
+      }
       if (control?.hasAttribute('data-lunch-confirm')) { add('user', 'Ja, bitte'); run(blockLunch); }
       if (control?.hasAttribute('data-lunch-cancel')) cancel();
       if (control?.hasAttribute('data-lunch-other')) run(alternative);
@@ -274,7 +352,13 @@ export function makeAssistant(ctx, currentAccounts) {
       if (proposal && isNo(text)) return cancel();
       if (proposal && /^(?:andere zeit|später)[.! ]*$/i.test(text)) return run(alternative);
       proposal = null;
-      if (aiAvailable) return run(epoch => useOpenAI(text, epoch));
+      if (aiAvailable) {
+        if (pendingCase && isNo(text)) { pendingCase = null; add('assistant', 'Auswahl abgebrochen.'); draw(); return; }
+        const picked = pendingCase && findAssistantDossier(pendingCase.choices, text).match;
+        if (picked) return run(epoch => chooseDossier(picked.id, epoch));
+        pendingCase = null;
+        return run(epoch => useOpenAI(text, epoch));
+      }
       const task = interpretTask(text);
       const request = lunchRequest(text);
       if (task) return run(epoch => addTask(task, epoch));

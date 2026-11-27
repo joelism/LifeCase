@@ -5,7 +5,7 @@ export class AssistantFailure extends Error {
 const swissFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Zurich', year: 'numeric', month: '2-digit', day: '2-digit' });
 const swissDay = now => swissFormat.format(now);
 
-const purposes = ['answer', 'clarify', 'appointment', 'task', 'lunch', 'agenda'];
+const purposes = ['answer', 'clarify', 'appointment', 'task', 'lunch', 'agenda', 'chronicle', 'case_overview'];
 const taskKinds = ['Aufgabe', 'Frist', 'Wiedervorlage'];
 const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const date = /^\d{4}-\d{2}-\d{2}$/;
@@ -15,14 +15,20 @@ const string = { type: 'string' };
 const properties = {
   action: { type: 'string', enum: purposes },
   reply: string, title: string, date: string, time: string, endTime: string, endDate: string, location: string,
+  caseQuery: string, sourceQuote: string,
+  knowledge: { type: 'string', enum: ['', 'reported', 'observed', 'unclear'] },
   taskKind: { type: 'string', enum: ['', ...taskKinds] }, duration: { type: 'integer' },
 };
 const format = { type: 'json_schema', name: 'lifecase_intent', strict: true,
   schema: { type: 'object', additionalProperties: false, properties, required: Object.keys(properties) } };
 const rules = [
   'Du bist der persönliche LifeCase-Assistent. Antworte kurz und natürlich auf Deutsch (Schweiz).',
-  'In dieser Funktion kannst du eine einzelne Aktion vorschlagen: neuen Termin anlegen, neue Aufgabe speichern, Mittagspause suchen oder einen Kalendertag anzeigen.',
+  'In dieser Funktion kannst du eine einzelne Aktion vorschlagen: neuen Termin anlegen, neue Aufgabe speichern, Mittagspause suchen, einen Kalendertag anzeigen, Notiz in einem Dossier festhalten oder bisherige Dossier-Einträge anzeigen.',
   'Wähle appointment oder task ausschliesslich bei einem eindeutigen Auftrag zur Erfassung. Verwende kurze sachliche Titel und trenne Ort und Zeitangaben.',
+  'Nutze chronicle, wenn etwas als Notiz, Ereignis, Aufzeichnung oder Gespräch im Dossier dokumentiert werden soll. Erstelle einen kurzen neutralen Titel ohne erfundene Einzelheiten, Motive, Schlussfolgerungen oder Quellen. Wenn die Aussage fehlt oder unvollständig ist, verwende clarify.',
+  'Für chronicle ist caseQuery der vom Nutzer genannte Dossiername ohne Füllwörter. Nenne dasselbe Dossier auch in caseQuery, wenn ein Termin oder eine Aufgabe ausdrücklich dort verknüpft werden soll. Nutze case_overview zum Anzeigen vorhandener Einträge eines genannten Dossiers.',
+  'sourceQuote ist bei chronicle eine wortgetreue zusammenhängende Passage, die den ganzen Sachverhalt aus einer Benutzernachricht enthält. Lasse Anweisungen zum Speichern weg und ändere keine Wörter, Grossschreibung oder Satzzeichen. Erfinde keine Aussagen oder Ursachen einzelner Personen.',
+  'Bei «ich habe heute gehört» oder erkennbar weitergegebenen Informationen ist knowledge=reported. Bei ausdrücklicher eigener Wahrnehmung observed, sonst unclear. Formuliere auch im Titel mit erkennbarer Unsicherheit, etwa «Gehörte Aussage zur Schichtplanung». Das Datum bei Hörensagen bezeichnet, wann der Nutzer davon erfuhr. Falls ungenannt, verwende heute. Eine nur erwähnte Person ist nicht automatisch die Informationsquelle.',
   'Für Termine brauchst du Titel, konkretes Datum und Startzeit. Frage bei fehlenden oder widersprüchlichen Angaben gezielt nach (clarify).',
   'Nutze bei «am selben Tag» den letzten bestätigten Termin. Ein explizites Datum hat Vorrang. Übernimm bei einer Antwort auf eine Rückfrage den ursprünglichen Betreff.',
   'Ein Tag wird als YYYY-MM-DD und eine Uhrzeit als HH:MM angegeben. Rechne eine ausdrücklich genannte Dauer in eine Endzeit um. Nur bei einem Ende nach Mitternacht ist endDate gesetzt.',
@@ -47,7 +53,7 @@ function messagesOf(values) {
   });
 }
 
-export function assistantIntent(result, now = new Date()) {
+export function assistantIntent(result, now = new Date(), messages = []) {
   const textKeys = Object.keys(properties).filter(key => key !== 'duration');
   if (!result || textKeys.some(key => typeof result[key] !== 'string') ||
       !purposes.includes(result.action) || !Number.isInteger(result.duration)) throw badAnswer();
@@ -57,6 +63,19 @@ export function assistantIntent(result, now = new Date()) {
     return { action, reply: result.reply.trim().slice(0, 900) };
   }
   const today = swissDay(now);
+  const caseQuery = result.caseQuery.trim().slice(0, 160);
+  if (action === 'case_overview') return { action, caseQuery };
+  if (action === 'chronicle') {
+    const quote = result.sourceQuote.trim();
+    const original = [...messages].reverse().find(item => item.role === 'user' && quote.length >= 8 && item.content.includes(quote))?.content;
+    const title = result.title.trim();
+    if (!original || !title || title.length > 160 || /[\u0000-\u001f]/.test(title) ||
+        !['reported', 'observed', 'unclear'].includes(result.knowledge) ||
+        (day && (!realDay(day) || day > today)) || (time && !clock.test(time))) throw badAnswer();
+    return { action, caseQuery, fields: { title, date: day || today, time, location: result.location.trim().slice(0, 250),
+      notes: quote, knowledge: result.knowledge, original } };
+  }
+  const link = caseQuery ? { caseQuery } : {};
   if ((!day && (action !== 'task' || taskKind !== 'Aufgabe' || time)) ||
       (day && (!realDay(day) || (action !== 'agenda' && day < today)))) throw badAnswer();
   if (action === 'agenda') return { action, date: day };
@@ -68,28 +87,53 @@ export function assistantIntent(result, now = new Date()) {
   if (!title || title.length > 160 || /[\u0000-\u001f]/.test(title) || (time && !clock.test(time))) throw badAnswer();
   if (action === 'task') {
     if (!taskKinds.includes(taskKind)) throw badAnswer();
-    return { action, fields: { title, date: day, time, kind: taskKind, reminderDays: day ? '0' : '', status: 'Offen' } };
+    return { action, ...link, fields: { title, date: day, time, kind: taskKind, reminderDays: day ? '0' : '', status: 'Offen' } };
   }
   if (!clock.test(time) || (day === today && time < timeFormat.format(now)) ||
       (endTime && (!clock.test(endTime) || (!endDate && endTime <= time))) ||
       (endDate && (!endTime || !realDay(endDate) || Date.parse(endDate) - Date.parse(day) !== 86400000))) throw badAnswer();
-  return { action, fields: { title, date: day, time, endTime, endDate, location: result.location.trim().slice(0, 250) } };
+  return { action, ...link, fields: { title, date: day, time, endTime, endDate, location: result.location.trim().slice(0, 250) } };
 }
 
-const badAnswer = () => new AssistantFailure(422, 'Ich konnte die Angaben nicht eindeutig prüfen. Nenne mir Titel, Datum und Uhrzeit in einer Nachricht.');
+const badAnswer = () => new AssistantFailure(422, 'Ich konnte die Angaben nicht eindeutig prüfen. Ergänze bitte, was du festhalten oder planen willst.');
 
-export async function askAssistant({ apiKey, values, now = new Date(), transport = fetch }) {
-  const messages = messagesOf(values);
-  const lastDate = typeof values.lastDate === 'string' && realDay(values.lastDate) ? values.lastDate : '';
-  const instructions = rules + '\nJetzt in Europe/Zurich: ' + dayFormat.format(now) + ', ' + swissDay(now) +
-    ' um ' + timeFormat.format(now) + '. Letzter bestätigter Termin: ' + (lastDate || 'keiner') + '.';
+const helps = ['', 'prepare', 'reminders', 'week', 'mail', 'lunch'];
+const briefingFormat = { type: 'json_schema', name: 'lifecase_daily_brief', strict: true, schema: {
+  type: 'object', additionalProperties: false, required: ['text', 'help'],
+  properties: { text: string, help: { type: 'string', enum: helps } },
+} };
+const briefingRules = [
+  'Du schreibst einen persönlichen, ruhigen Tagesbrief für LifeCase auf Deutsch (Schweiz), in Du-Form.',
+  'Verwende ausschliesslich die angegebenen Zahlen und Uhrzeiten. days[0] steht für heute, days[1] für morgen. firstTime ist die erste geplante Zeit des Tages und kann bereits vorbei sein.',
+  'Hebe in maximal zwei kurzen Sätzen den wichtigsten Hinweis hervor. Priorisiere tatsächliche Überschneidungen, fällige Aufgaben, bald ablaufende Dokumente oder einen besonders vollen Tag.',
+  'Wähle nur eine der angebotenen Hilfen aus actions, wenn sie zum wichtigsten Hinweis passt. Gib sonst einen leeren help-Wert zurück.',
+  'Erfinde keine Termine, Personen, Ursachen oder Fristen. Stell keine medizinischen oder rechtlichen Vermutungen an.',
+].join('\n');
+
+function briefingOf(value, now) {
+  const day = swissDay(now);
+  const number = count => Number.isInteger(count) && count >= 0 && count <= 10000;
+  const totals = ['overdue', 'openTasks', 'reminders', 'expiring', 'suggestions'];
+  const daily = ['appointments', 'shifts', 'tasks', 'tight', 'overlaps'];
+  if (value?.day !== day || !Array.isArray(value.days) || value.days.length !== 2 ||
+      totals.some(key => !number(value[key])) || !Array.isArray(value.actions) || value.actions.length > 5 ||
+      value.actions.some(action => !action || !helps.includes(action))) throw badAnswer();
+  const days = value.days.map(item => {
+    if (daily.some(key => !number(item?.[key])) || (item.firstTime !== '' && !clock.test(item.firstTime))) throw badAnswer();
+    return { ...Object.fromEntries(daily.map(key => [key, item[key]])), firstTime: item.firstTime };
+  });
+  return { day, time: timeFormat.format(now), days, actions: [...new Set(value.actions)],
+    ...Object.fromEntries(totals.map(key => [key, value[key]])) };
+}
+
+async function modelResponse({ apiKey, input, instructions, outputFormat, transport }) {
   let response;
   try {
     response = await transport('https://api.openai.com/v1/responses', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
       headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gpt-5-mini', instructions, input: messages, store: false,
-        reasoning: { effort: 'minimal' }, max_output_tokens: 750, text: { format } }),
+      body: JSON.stringify({ model: 'gpt-5-mini', instructions, input, store: false,
+        reasoning: { effort: 'minimal' }, max_output_tokens: 1000, text: { format: outputFormat } }),
     });
   } catch {
     throw new AssistantFailure(503, 'OpenAI antwortet gerade nicht. Versuche es nochmals.');
@@ -100,9 +144,24 @@ export async function askAssistant({ apiKey, values, now = new Date(), transport
   if (data?.status !== 'completed' || !Array.isArray(data.output)) throw badAnswer();
   const output = data.output.filter(item => item.type === 'message' && item.role === 'assistant')
     .flatMap(item => item.content || []);
-  if (output.some(part => part.type === 'refusal')) return { action: 'answer', reply: 'Bei dieser Nachricht kann ich dir nicht helfen.' };
+  if (output.some(part => part.type === 'refusal')) return null;
   const answer = output.filter(part => part.type === 'output_text').map(part => part.text).join('');
-  let result;
-  try { result = JSON.parse(answer); } catch { throw badAnswer(); }
-  return assistantIntent(result, now);
+  try { return JSON.parse(answer); } catch { throw badAnswer(); }
+}
+
+export async function askAssistant({ apiKey, values, now = new Date(), transport = fetch }) {
+  if (values.briefing) {
+    const facts = briefingOf(values.briefing, now);
+    const result = await modelResponse({ apiKey, input: JSON.stringify(facts),
+      instructions: briefingRules, outputFormat: briefingFormat, transport });
+    const text = typeof result?.text === 'string' ? result.text.trim() : '';
+    if (!text || text.length > 320) throw badAnswer();
+    return { action: 'briefing', text, help: facts.actions.includes(result.help) ? result.help : '' };
+  }
+  const messages = messagesOf(values);
+  const lastDate = typeof values.lastDate === 'string' && realDay(values.lastDate) ? values.lastDate : '';
+  const instructions = rules + '\nJetzt in Europe/Zurich: ' + dayFormat.format(now) + ', ' + swissDay(now) +
+    ' um ' + timeFormat.format(now) + '. Letzter bestätigter Termin: ' + (lastDate || 'keiner') + '.';
+  const result = await modelResponse({ apiKey, input: messages, instructions, outputFormat: format, transport });
+  return result ? assistantIntent(result, now, messages) : { action: 'answer', reply: 'Bei dieser Nachricht kann ich dir nicht helfen.' };
 }
