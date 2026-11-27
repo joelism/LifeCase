@@ -1,3 +1,5 @@
+import { isSleepPlanningTime, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
+import { sleepSettingsFields } from './sleep-views.js';
 import { appointmentCheckIns } from './appointment-care.js';
 import { openAppointmentCheckIn } from './appointment-dialogs.js';
 import { briefingSnapshot, makeDailyBriefing } from './daily-briefing.js';
@@ -173,7 +175,7 @@ function mainView() {
     const snapshot = ready ? briefingSnapshot(state.rows, connected.state.events, suggestions) : null;
     if (snapshot) queueMicrotask(() => { if (state.verified && state.view === 'Übersicht') briefing.refresh(snapshot); });
     return dashboard(state.rows, state.loading, connected.state, {
-      name: profileName(state.session?.user), suggestions, briefing: snapshot ? briefing.view(snapshot) : '',
+      name: profileName(state.session?.user), suggestions, briefing: snapshot ? briefing.view(snapshot) : '', sleepSettings: sleepPreferences(state.session?.user),
     });
   }
   if (state.view === 'Meine Woche') return planner.view(state.rows, connected.state);
@@ -211,6 +213,7 @@ function go(view, filter = '', focus = true) {
   render();
   window.scrollTo(0, 0);
   connected.activate();
+  refreshRecentSleep();
   if (view === 'Terminprüfung') daily.load(true);
   if (view === 'Google Drive') drive.activate();
   if (view === 'Erinnerungen') refreshPush();
@@ -223,8 +226,14 @@ function showCalendarDate(date, filter = '') {
   state.calendar.selected = date;
   render();
 }
+function refreshRecentSleep() {
+  if (state.view === 'Übersicht' && isSleepPlanningTime() && sleepPreferences(state.session?.user).enabled) {
+    connected.loadRecentSleep();
+  }
+}
 async function sync(showNotice = false) {
   if (!state.verified) return;
+  refreshRecentSleep();
   const epoch = state.epoch;
   daily.load(showNotice);
   const revision = ++syncVersion;
@@ -495,6 +504,7 @@ document.addEventListener('click', async event => {
     render();
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
+  else if ('sleepSettings' in action) openSleepSettings();
   else if ('careCheckIn' in action) openAppointmentCheckIn(action.careCheckIn, ctx);
   else if ('assistant' in action || 'assistantLunch' in action) assistant.open('assistantLunch' in action);
   else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);
@@ -549,6 +559,37 @@ document.addEventListener('click', async event => {
 });
 app.addEventListener('input', handleFilter);
 app.addEventListener('change', handleFilter);
+function openSleepSettings() {
+  const modal = openDialog('Schlafplan einstellen', sleepSettingsFields(sleepPreferences(state.session?.user)),
+    button('Schliessen', 'close') + '<button type="submit" class="button primary">Speichern</button>', true);
+  const form = modal.querySelector('form');
+  const control = form.querySelector('[type="submit"]');
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    if (!state.verified || control.disabled) return;
+    const epoch = state.epoch;
+    const values = new FormData(form);
+    const settings = { enabled: values.has('enabled'), wake: String(values.get('wake') || ''),
+      goal: Number(values.get('goal')), lead: Number(values.get('lead')) };
+    if (!validSleepPlan(settings)) {
+      errorAt(form, userError('Wähle eine Aufstehzeit und ein Schlafziel. Der Puffer darf höchstens 240 Minuten betragen.'));
+      return;
+    }
+    control.disabled = true;
+    try {
+      const result = get(await db.auth.updateUser({ data: sleepProfileUpdate(settings) }));
+      if (epoch !== state.epoch) return;
+      state.session = { ...state.session, user: result.user };
+      if (form.isConnected) closeDialog();
+      render();
+      refreshRecentSleep();
+      notify('Schlafplan gespeichert.');
+    } catch (error) {
+      if (epoch === state.epoch) errorAt(form, error);
+    } finally { control.disabled = false; }
+  });
+}
+
 async function saveProfile(form, control) {
   if (!state.verified || control.disabled) return;
   const epoch = state.epoch;

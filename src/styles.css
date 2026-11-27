@@ -324,6 +324,13 @@ dialog:has(.assistant-thread) .dialog-body{min-height:0;grid-template-rows:minma
 .day-date{display:block;color:var(--muted);font-size:13px;font-weight:630}
 .day-welcome h1{margin-top:7px;font-size:clamp(31px,5vw,48px);letter-spacing:-.047em;font-weight:740;overflow-wrap:anywhere}
 .day-week{flex:none;color:var(--accent)}
+.sleep-plan{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:start;gap:12px;padding:16px}
+.sleep-plan-copy{display:grid;gap:4px;min-width:0}
+.sleep-plan-copy h2{font-size:clamp(17px,3.8vw,22px);line-height:1.2}
+.sleep-plan-copy p{overflow-wrap:anywhere;margin:0}
+.sleep-plan-history{color:var(--accent);font-size:13px;font-weight:650}
+.sleep-settings-grid input[type="time"]{min-width:0}
+@media(max-width:540px){.sleep-plan{grid-template-columns:auto minmax(0,1fr)}.sleep-plan>.button{grid-column:2;justify-self:start}}
 .dashboard-flow{display:grid;grid-template-columns:minmax(0,1fr);min-width:0;gap:14px}
 .dashboard-flow>.panel{margin-top:0}
 .dashboard-flow .empty{grid-template-columns:auto minmax(0,1fr);align-items:center;justify-items:start;gap:12px;text-align:left;padding:18px}

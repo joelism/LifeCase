@@ -15,11 +15,12 @@ export async function connection(action, values = {}, binary = false) {
   throw userError(problem.problem || 'Die Verbindung ist zurzeit nicht erreichbar.');
 }
 
-export async function healthRows(from) {
+export async function healthRows(from, metric = '') {
   const all = [];
   for (let offset = 0; ; offset += 500) {
-    const rows = get(await db.from('lifecase_health_days').select('day,metric,value,source,source_name')
-      .gte('day', from).order('day', { ascending: false }).order('metric').order('source').range(offset, offset + 499));
+    const query = db.from('lifecase_health_days').select('day,metric,value,source,source_name').gte('day', from);
+    if (metric) query.eq('metric', metric);
+    const rows = get(await query.order('day', { ascending: false }).order('metric').order('source').range(offset, offset + 499));
     all.push(...rows);
     if (rows.length < 500) return all;
   }

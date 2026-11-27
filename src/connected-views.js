@@ -121,7 +121,8 @@ export function healthView(state) {
       data.slice().reverse().map(row => '<tr><td>' + esc(showDate(row.day)) + '</td><td>' + formatter.format(row.value) + ' ' + esc(info.unit) +
       '</td><td>' + esc(row.source_name) + '</td></tr>').join('') + '</tbody></table></div></details>' :
       empty(info.icon, state.healthLoading ? 'Tageswerte werden geladen …' : 'Keine Werte in diesem Zeitraum', 'Die ausgewählten Messwerte erscheinen nach dem Import hier.')) + '</div>';
-  return heading('Gesundheitsdaten', button('Apple-Health-Export importieren', 'health-import', '', 'upload', 'primary')) +
+  return heading('Gesundheitsdaten', button('Schlafplan einstellen', 'sleep-settings', '', 'moon') +
+    button('Apple-Health-Export importieren', 'health-import', '', 'upload', 'primary')) +
     (state.healthError ? '<div class="banner" role="alert">' + esc(state.healthError) + '</div>' : '') +
     panel(info.label, main) + panel('Datenquellen', '<div class="panel-body settings-content"><p>Apple Health · ' +
       (connected ? 'HealthKit-Tageswerte vorhanden' : 'ZIP- oder XML-Import') + '</p>' +

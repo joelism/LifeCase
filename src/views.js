@@ -1,3 +1,4 @@
+import { renderSleepPlan } from './sleep-views.js';
 import { appointmentCheckIns, checkInQuestion } from './appointment-care.js';
 import { calendarRecordTitle } from './calendar-assistant.js';
 import { displayedAgenda, providers } from './connected-model.js';
@@ -118,11 +119,15 @@ export function checkInPanel(rows, limit = rows.length) {
   rows.length > limit ? jump('Alle Rückfragen', 'view', 'Erinnerungen') : '');
 }
 
-export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '' } = {}) {
+export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '', sleepSettings = null } = {}) {
   const day = today();
   const active = rows.filter(isActive);
   const openCases = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen').length;
-  const timeline = groupWorkdays(displayedAgenda(active, connected.events).filter(item => item.state === 'Offen'));
+  const agenda = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
+  const timeline = groupWorkdays(agenda);
+  const sleep = !loading && sleepSettings ? renderSleepPlan(agenda, connected.recentSleep, sleepSettings, {
+    overview: true, calendarIncomplete: !connected.accounts || connected.calendarLoading || Boolean(connected.calendarErrors?.length),
+  }) : '';
   const datedTasks = timeline.filter(item => planningKinds.includes(item.kind));
   const undated = active.filter(row => isOpenTask(row) && !value(row, 'date')).length;
   const reminders = timeline.filter(item => reminderDue(item, day)).length;
@@ -155,7 +160,7 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   return '<header class="day-welcome"><div><span class="day-date">' + esc(labels.format(new Date())) +
     '</span><h1>' + esc(greeting) + '</h1></div>' +
     button('Meine Woche', 'view', 'Meine Woche', 'week', 'day-week') + '</header>' + externalStatus(connected) +
-    '<div class="dashboard-flow">' + checkInPanel(appointmentCheckIns(active), 2) + briefing + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    '<div class="dashboard-flow">' + checkInPanel(appointmentCheckIns(active), 2) + briefing + sleep + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
     shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('chat', 'Assistent', 'assistant', '') +
     shortcut('camera', 'Dokument scannen', 'scan-start', 'document') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
     '</nav>' + (urgent ? glance : '') + upcomingPanel + (urgent ? '' : glance) + '</div>';

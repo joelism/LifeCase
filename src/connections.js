@@ -12,7 +12,7 @@ const initialMail = (provider = 'microsoft', query = '') => ({ provider, query, 
 const initial = () => ({
   accounts: null, statusLoading: false, callback: '', error: '', mail: initialMail(),
   events: [], eventsKey: '', eventsLoaded: false, calendarLoading: false, calendarErrors: [],
-  health: [], metric: 'steps', healthRange: '30', healthLoading: false, healthLoaded: false, healthError: '',
+  health: [], recentSleep: null, metric: 'steps', healthRange: '30', healthLoading: false, healthLoaded: false, healthError: '',
 });
 
 export function makeConnections(ctx) {
@@ -21,6 +21,8 @@ export function makeConnections(ctx) {
   let mailSerial = 0;
   let calendarSerial = 0;
   let stopHealthRead;
+  let recentSleepAt = 0;
+  let recentSleepSerial = 0;
   const errorBox = '<p class="form-error" role="alert" hidden></p>';
   const submit = (label, symbol) => '<button type="submit" class="button primary">' + icon(symbol, 18) + esc(label) + '</button>';
   const update = (views = []) => {
@@ -36,6 +38,8 @@ export function makeConnections(ctx) {
     ++calendarSerial;
     stopHealthRead?.();
     stopHealthRead = null;
+    recentSleepAt = 0;
+    ++recentSleepSerial;
     lastStatus = 0;
     Object.assign(state, initial());
   }
@@ -134,6 +138,17 @@ export function makeConnections(ctx) {
     state.eventsLoaded = true;
     update(['Übersicht', 'Kalender', 'Meine Woche']);
   }
+  async function loadRecentSleep() {
+    if (Date.now() - recentSleepAt < 5 * 60000) return;
+    recentSleepAt = Date.now();
+    const serial = ++recentSleepSerial;
+    try {
+      const rows = await healthRows(shiftDate(today(), -6), 'sleep');
+      if (serial !== recentSleepSerial) return;
+      state.recentSleep = rows;
+      update(['Übersicht']);
+    } catch { /* The suggested time can still be calculated from the calendar. */ }
+  }
   async function loadHealth(force = false) {
     if (state.healthLoading || (state.healthLoaded && !force)) return;
     const epoch = ctx.epoch();
@@ -143,6 +158,9 @@ export function makeConnections(ctx) {
       const result = await healthRows(shiftDate(today(), -365));
       if (epoch !== ctx.epoch()) return;
       state.health = result;
+      ++recentSleepSerial;
+      recentSleepAt = Date.now();
+      state.recentSleep = result.filter(row => row.metric === 'sleep');
       state.healthLoaded = true;
       state.healthError = '';
     } catch (error) {
@@ -418,5 +436,5 @@ export function makeConnections(ctx) {
   }
   function search(form) { loadMail(String(new FormData(form).get('query') || '').trim()); }
   function range(element) { state.healthRange = element.value; update(); }
-  return { state, reset, status, agenda, activate, consumeReturn, click: handleClick, search, range };
+  return { state, reset, status, agenda, loadRecentSleep, activate, consumeReturn, click: handleClick, search, range };
 }
