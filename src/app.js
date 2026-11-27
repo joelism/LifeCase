@@ -1,4 +1,4 @@
-import { isSleepPlanningTime, planSleep, sleepMorning, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
+import { isSleepPlanningTime, planSleep, sleepMorning, sleepMorningCanBeSaved, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
 import { renderSleepPlan, sleepSettingsFields } from './sleep-views.js';
 import { appointmentCheckIns } from './appointment-care.js';
 import { openAppointmentCheckIn } from './appointment-dialogs.js';
@@ -186,13 +186,10 @@ function sleepCheckIn(now = new Date()) {
 async function saveSleepMorning(answer, epoch) {
   if (!state.verified || epoch !== state.epoch) return;
   const now = new Date();
-  if (!isSleepPlanningTime(now) || answer.date !== sleepMorningDate(now)) {
-    throw userError('Die Frage gehört zu einer anderen Nacht. Öffne den Schlafplan erneut.');
+  if (!sleepMorningCanBeSaved(answer, now)) {
+    throw userError('Diese Zeit ist schon vorbei oder liegt ausserhalb von heute und morgen. Wann möchtest du aufstehen?');
   }
-  if (planSleep([], sleepPreferences(state.session?.user), now, answer).alreadyArose) {
-    throw userError('Diese Uhrzeit ist schon vorbei. Wähle eine spätere Zeit oder «Ausschlafen».');
-  }
-  const result = get(await db.auth.updateUser({ data: sleepMorningUpdate(answer) }));
+  const result = get(await db.auth.updateUser({ data: sleepMorningUpdate(answer, state.session?.user, now) }));
   if (epoch !== state.epoch) return;
   state.session = { ...state.session, user: result.user };
   render();

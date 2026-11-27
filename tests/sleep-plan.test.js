@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isSleepPlanningTime, planSleep, readSleepReply, sleepDefaults, sleepHistory, sleepMorning, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from '../src/sleep-plan.js';
+import { isSleepPlanningTime, planSleep, readSleepReply, sleepDefaults, sleepHistory, sleepMorning, sleepMorningCanBeSaved, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from '../src/sleep-plan.js';
 import { renderSleepPlan, sleepQuestion, sleepSettingsFields } from '../src/sleep-views.js';
 
 const evening = new Date('2026-11-28T18:00:00Z');
@@ -102,12 +102,39 @@ test('recent sleep uses one value per day and preserves the user-configured pref
 
 test('the chat accepts clear times or free mornings without consuming other assistant requests', () => {
   for (const reply of ['Ich habe morgen frei.', 'hab morgen frei', 'Keine feste Zeit', 'morgen schlafe ich aus', 'ich schlafe morgen aus']) {
-    assert.deepEqual(readSleepReply(reply), { wake: '' }, reply);
+    assert.deepEqual(readSleepReply(reply, answer('').date, evening), answer(''), reply);
   }
   for (const reply of ['9:30', 'Um 9.30 Uhr', 'Ich stehe morgen um 9:30 auf']) {
-    assert.deepEqual(readSleepReply(reply), { wake: '09:30' }, reply);
+    assert.deepEqual(readSleepReply(reply, answer('').date, evening), answer('09:30'), reply);
   }
   for (const reply of ['Wann habe ich morgen frei?', 'Arzttermin morgen um 9:30', 'Ich bin bis 9:30 frei', '25:00', '9:00 oder 10:00']) {
-    assert.equal(readSleepReply(reply), null, reply);
+    assert.equal(readSleepReply(reply, answer('').date, evening), null, reply);
   }
+});
+
+test('explicit messages work at any hour with no open sleep question; standalone times stay ambiguous', () => {
+  const afternoon = new Date('2026-11-28T13:00:00Z');
+  for (const reply of ['Ich kann morgen ausschlafen', 'Morgen habe ich frei und kann ausschlafen', 'Hab morgen frei']) {
+    assert.deepEqual(readSleepReply(reply, '', afternoon), answer(''), reply);
+  }
+  for (const reply of ['Morgen stehe ich erst um 9:30 auf', 'Ich muss morgen um 9:30 aufstehen', 'Ich stehe um 9:30 auf']) {
+    assert.deepEqual(readSleepReply(reply, '', afternoon), answer('09:30'), reply);
+  }
+  for (const reply of ['morgen um 9:30', '9:30', 'morgen um 9:30 arbeiten', 'morgen frei?']) {
+    assert.equal(readSleepReply(reply, '', afternoon), null, reply);
+  }
+});
+
+test('midnight keeps an explicitly different day separate from the open sleep question', () => {
+  const afterMidnight = new Date('2026-11-28T23:30:00Z');
+  const morning = answer('09:30');
+  const nextDay = { date: '2026-11-30', wake: '' };
+  assert.deepEqual(readSleepReply('Morgen kann ich ausschlafen', morning.date, afterMidnight), nextDay);
+  assert.deepEqual(readSleepReply('heute Morgen stehe ich um 9:30 auf', '', afterMidnight), morning);
+  const user = { user_metadata: { ...sleepMorningUpdate(morning), ...sleepMorningUpdate(nextDay) } };
+  assert.deepEqual(sleepMorning(user, afterMidnight), morning);
+  assert.deepEqual(sleepMorning(user, new Date('2026-11-29T18:00:00Z')), nextDay);
+  assert.deepEqual(sleepMorning({ user_metadata: { lifecase_sleep_morning: morning } }, afterMidnight), morning);
+  assert.equal(sleepMorningCanBeSaved(nextDay, afterMidnight), true);
+  assert.equal(sleepMorningCanBeSaved({ ...morning, wake: '00:15' }, afterMidnight), false);
 });

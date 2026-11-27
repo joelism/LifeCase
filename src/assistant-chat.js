@@ -63,12 +63,14 @@ export function makeAssistant(ctx, currentAccounts) {
     return '<div class="assistant-bubble assistant"><p>' + esc(sleepMessage(sleep)) + '</p><div class="actions">' +
       choices.join('') + '</div></div>';
   }
-  async function recordSleepReply(sleep, wake, text, epoch) {
-    const date = sleep.plan.morning;
-    await ctx.saveSleepMorning({ date, wake }, epoch);
+  async function recordSleepReply(answer, text, epoch, question) {
+    await ctx.saveSleepMorning(answer, epoch);
     if (epoch !== ctx.epoch()) return;
-    sleepEditingDay = '';
-    add('assistant', sleepMessage(sleep));
+    const { date, wake } = answer;
+    if (question?.plan.morning === date) {
+      sleepEditingDay = '';
+      add('assistant', sleepMessage(question));
+    }
     add('user', text);
     add('assistant', wake ? 'Für den ' + showDate(date) + ' ist ' + wake + ' Uhr als Aufstehzeit gespeichert.' :
       'Für den ' + showDate(date) + ' lasse ich deine Aufstehzeit offen.');
@@ -365,7 +367,7 @@ export function makeAssistant(ctx, currentAccounts) {
       '<div class="actions">' + button('Ja, bitte','lunch-confirm','','check','primary') +
         button('Andere Zeit','lunch-other','','clock') + button('Nein','lunch-cancel') + '</div></div>';
     const status = aiAvailable === null ? 'OpenAI-Verbindung wird geprüft …' :
-      aiAvailable ? 'OpenAI verarbeitet die Nachrichten, die du hier absendest.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
+      aiAvailable ? 'LifeCase verwendet OpenAI, um Chatnachrichten zu verstehen.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
     const caseControls = !busy && pendingCase ? '<div class="assistant-tools" aria-label="Dossier auswählen">' +
       pendingCase.choices.slice(0, 8).map(row => button(pendingCase.review ? 'In «' + nameOf(row) + '» speichern' : nameOf(row),
         'assistant-case', row.id, 'folder', pendingCase.preferred === row.id ? 'primary' : '')).join('') +
@@ -397,7 +399,7 @@ export function makeAssistant(ctx, currentAccounts) {
       shownSleep = openSleepQuestion();
       thread.innerHTML = content(shownSleep);
       scrollToEnd();
-      submit.disabled = busy || (aiAvailable === null && !shownSleep);
+      submit.disabled = busy;
     };
     trackViewport(dialog, form, scrollToEnd);
     field.addEventListener('input', () => { pendingMessage = field.value; });
@@ -449,7 +451,7 @@ export function makeAssistant(ctx, currentAccounts) {
       if (control?.hasAttribute('data-sleep-reply') && shownSleep) {
         const wake = control.dataset.sleepReply;
         const question = shownSleep;
-        run(epoch => recordSleepReply(question, wake, wake ? wake + ' Uhr' : 'Ausschlafen', epoch));
+        run(epoch => recordSleepReply({ date: question.plan.morning, wake }, wake ? wake + ' Uhr' : 'Ausschlafen', epoch, question));
         return;
       }
       if (control?.hasAttribute('data-assistant-case')) {
@@ -476,12 +478,12 @@ export function makeAssistant(ctx, currentAccounts) {
       if (busy) return;
       const text = field.value.trim();
       if (!text) return;
-      const question = shownSleep;
-      const answer = question && readSleepReply(text);
+      const question = proposal || pendingCase || pendingAppointment || draft ? null : shownSleep;
+      const answer = readSleepReply(text, question?.plan.morning);
       if (!answer && aiAvailable === null) return;
       field.value = '';
       pendingMessage = '';
-      if (answer) return run(epoch => recordSleepReply(question, answer.wake, text, epoch), text);
+      if (answer) return run(epoch => recordSleepReply(answer, text, epoch, question), text);
       add('user', text);
       if (proposal && isYes(text)) return run(blockLunch);
       if (proposal && isNo(text)) return cancel();

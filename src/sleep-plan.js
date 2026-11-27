@@ -6,6 +6,7 @@ const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const scheduledKinds = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht']);
 const planKey = 'lifecase_sleep_plan';
 const morningKey = 'lifecase_sleep_morning';
+const datedMorningKey = day => morningKey + '_' + day;
 const validTime = value => typeof value === 'string' && timePattern.test(value);
 export const sleepDefaults = Object.freeze({ enabled: true, wake: '', goal: 480, lead: 60,
   earliestBed: '23:00', latestBed: '02:00' });
@@ -30,21 +31,33 @@ export function sleepMorningDate(now = new Date()) {
 }
 
 export function sleepMorning(user, now = new Date()) {
-  const answer = user?.user_metadata?.[morningKey];
-  return answer?.date === sleepMorningDate(now) && (answer.wake === '' || validTime(answer.wake)) ? answer : null;
+  const day = sleepMorningDate(now);
+  const metadata = user?.user_metadata;
+  const answer = metadata?.[datedMorningKey(day)] ?? metadata?.[morningKey];
+  return answer?.date === day && (answer.wake === '' || validTime(answer.wake)) ? answer : null;
 }
 
-export const sleepMorningUpdate = answer => ({ [morningKey]: answer });
+export function sleepMorningUpdate(answer, user, now = new Date()) {
+  const day = today(now);
+  const metadata = Object.keys(user?.user_metadata ?? {});
+  const past = metadata.filter(key => /^lifecase_sleep_morning_\d{4}-\d{2}-\d{2}$/.test(key) && key < datedMorningKey(day));
+  return { ...Object.fromEntries(past.map(key => [key, null])), [datedMorningKey(answer.date)]: answer };
+}
 
-export function readSleepReply(text) {
+export function readSleepReply(text, questionDay = '', now = new Date()) {
   const reply = text.toLocaleLowerCase('de-CH').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').replace(/^doch /, '');
-  const free = /^(?:(?:ich )?(?:hab(?:e)? )?(?:(?:morgen|heute) )?frei|(?:morgen|heute) hab(?:e)? ich frei|keine feste (?:aufsteh)?zeit|ohne wecker)$/;
-  const sleepIn = /^(?:ausschlafen|(?:ich )?schlafe?(?: (?:morgen|heute))? aus|(?:morgen|heute) schlafe? ich aus)$/;
-  if (free.test(reply) || sleepIn.test(reply)) {
-    return { wake: '' };
+  const days = reply.match(/\b(?:heute(?: morgen)?|morgen)\b/g) ?? [];
+  if (days.length > 1) return null;
+  const day = days[0];
+  const date = day === 'morgen' ? shiftDate(today(now), 1) : day ? today(now) : questionDay || sleepMorningDate(now);
+  const words = day ? reply.replace(/\b(?:heute(?: morgen)?|morgen)\b/, '').replace(/\s+/g, ' ').trim() : reply;
+  const time = words.match(/^(?:(?:(?:ich )?stehe?|stehe? ich|(?:ich )?(?:möchte|muss|will)|(?:möchte|muss|will) ich) )?(?:(?:erst|schon) )?(?:um )?([01]?\d|2[0-3])(?:[:.]([0-5]\d))?(?: uhr)?(?: (auf|aufstehen))?$/);
+  if (time && (questionDay || time[3] || /\bstehe?\b/.test(words))) {
+    return { date, wake: time[1].padStart(2, '0') + ':' + (time[2] || '00') };
   }
-  const time = reply.match(/^(?:(?:ich )?(?:stehe|möchte|muss|will)(?: (?:morgen|heute))? )?(?:(?:morgen|heute) )?(?:um )?([01]?\d|2[0-3])(?:[:.]([0-5]\d))?(?: uhr)?(?: (?:auf|aufstehen))?$/);
-  if (time) return { wake: time[1].padStart(2, '0') + ':' + (time[2] || '00') };
+  const free = /^(?:(?:(?:ich )?hab(?:e)? frei|hab(?:e)? ich frei)(?: und kann ausschlafen)?|frei|keine feste (?:aufsteh)?zeit|ohne wecker)$/;
+  const sleepIn = /^(?:ausschlafen|(?:ich )?schlafe? aus|schlafe? ich aus|(?:ich )?(?:kann|möchte|will) ausschlafen|(?:kann|möchte|will) ich ausschlafen)$/;
+  if (sleepIn.test(words) || ((day || questionDay) && free.test(words))) return { date, wake: '' };
   return null;
 }
 
@@ -60,6 +73,12 @@ function localTime(day, time) {
   const candidates = [-12, 12].map(hours => nominal - offsetAt(nominal + hours * 3600000));
   const matches = candidates.filter(ms => today(new Date(ms)) === day && clock.format(ms) === time);
   return matches.length ? Math.min(...matches) : Math.max(...candidates);
+}
+
+export function sleepMorningCanBeSaved({ date, wake }, now = new Date()) {
+  const day = today(now);
+  return (date === day || date === shiftDate(day, 1)) &&
+    (wake === '' || (validTime(wake) && localTime(date, wake) > now.getTime()));
 }
 
 export function sleepHistory(rows, now = new Date()) {
