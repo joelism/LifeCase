@@ -8,22 +8,31 @@ export function renderSleepPlan(entries, sleepRows, settings, { now = new Date()
   const plan = planSleep(entries, settings, now);
   if (plan.alreadyArose && overview) return '';
   const stats = sleepHistory(sleepRows ?? [], now);
-  const label = plan.conflict ? 'Ein Termin liegt im Schlaffenster' : plan.minutesLeft !== null ?
-    'Bis zum Aufstehen bleiben ' + sleepDuration(plan.minutesLeft) : 'Schlafenszeit ' + plan.bedTime + ' Uhr';
+  let label = 'Schlafenszeit ' + plan.bedTime + ' Uhr';
+  if (plan.minutesLeft !== null) label = 'Bis zum Aufstehen bleiben ' + sleepDuration(plan.minutesLeft);
+  if (plan.conflict) label = 'Ein Termin liegt im Schlaffenster';
+  if (!plan.plannedMinutes) label = 'Kein Schlafzeitfenster vor dem Aufstehen';
+  if (plan.alreadyArose) label = 'Geplante Aufstehzeit vorbei';
   const dayLabel = plan.wakeDay === today(now) ? 'Heute' : plan.wakeDay === plan.morning ? 'Morgen' : showDate(plan.wakeDay);
   const details = dayLabel + ' um ' + plan.wakeTime + ' Uhr aufstehen · Schlafziel ' + sleepDuration(settings.goal) + '.';
   const reason = plan.first ? (plan.first.kind === 'Schicht' ? 'Schichtbeginn' : 'Erster Termin') + ' um ' + plan.first.time + ' Uhr · ' +
     settings.lead + ' Min. Puffer.' :
     'Aus deiner eingestellten Aufstehzeit berechnet.';
+  const available = plan.minutesLeft ?? plan.plannedMinutes;
+  const shortfall = settings.goal - available;
+  const availability = available > 0 && shortfall > 0 && !plan.alreadyArose && !plan.conflict
+    ? (plan.minutesLeft === null ? 'Bis dahin sind ' + sleepDuration(available) + ' möglich, ' : 'Das sind ') +
+      sleepDuration(shortfall) + ' weniger als dein Schlafziel.' : '';
   const schedule = plan.conflict ? 'Um ' + plan.conflict.time + ' Uhr beginnt ein Eintrag, der mit dem Schlaffenster zusammenfällt.' :
-    plan.bedDay !== today(now) && plan.minutesLeft === null ? 'Schlafenszeit am ' + showDate(plan.bedDay) + '.' : '';
+    plan.plannedMinutes > 0 && !plan.alreadyArose && plan.bedDay !== today(now) && plan.minutesLeft === null ?
+      'Schlafenszeit am ' + showDate(plan.bedDay) + '.' : '';
   const summary = stats ? 'Letzte 7 Tage · Ø ' + sleepDuration(stats.average) + ' aus ' + stats.count +
     (stats.count === 1 ? ' Tag mit Schlafdaten' : ' Tagen mit Schlafdaten') : sleepRows ? 'Noch keine Schlafwerte aus den letzten 7 Tagen.' : '';
   const difference = stats && stats.average < settings.goal ? ' · ' + sleepDuration(settings.goal - stats.average) + ' unter deinem Ziel' : '';
   const history = summary ? '<p class="sleep-plan-history">' + esc(summary + difference) + '</p>' : '';
   return '<section class="panel sleep-plan" aria-labelledby="sleep-plan-title"><span class="tile-icon" aria-hidden="true">' + icon('moon', 20) +
     '</span><div class="sleep-plan-copy"><p class="hint">Schlafplan</p><h2 id="sleep-plan-title">' + esc(label) + '</h2><p>' + esc(details) +
-    '</p><p class="hint">' + esc([reason, schedule, calendarIncomplete ? 'Externer Kalender wird gerade nicht vollständig berücksichtigt.' : ''].filter(Boolean).join(' ')) +
+    '</p><p class="hint">' + esc([availability, reason, schedule, calendarIncomplete ? 'Externer Kalender wird gerade nicht vollständig berücksichtigt.' : ''].filter(Boolean).join(' ')) +
     '</p>' + history + '</div>' + button('Einstellen', 'sleep-settings', '', 'settings') + '</section>';
 }
 
@@ -34,7 +43,9 @@ export function sleepSettingsFields(settings) {
     '> Schlafplan am Abend auf «Heute» anzeigen</label>' +
     '<label class="input-wrap">Gewohnte Aufstehzeit<input type="time" name="wake" value="' + esc(settings.wake) + '" required></label>' +
     '<label class="input-wrap">Schlafziel<select name="goal">' + options(goals, String(settings.goal)) + '</select></label>' +
+    '<label class="input-wrap">Frühestens schlafen gehen<input type="time" name="earliestBed" value="' + esc(settings.earliestBed) + '" required></label>' +
+    '<label class="input-wrap">Spätestens schlafen gehen<input type="time" name="latestBed" value="' + esc(settings.latestBed) + '" required></label>' +
     '<label class="input-wrap wide">Puffer vor einem frühen Termin (Minuten)<input type="number" name="lead" min="0" max="240" step="1" value="' +
-    esc(settings.lead) + '" required></label><p class="hint wide">Der Vorschlag kann bei frühen Terminen früher ausfallen. Der Schlafverlauf wird in LifeCase berechnet.</p>' +
+    esc(settings.lead) + '" required></label><p class="hint wide">Bei frühen Terminen zeigt dir LifeCase, wie viel Zeit bis zum Aufstehen bleibt. Der Schlafverlauf wird in LifeCase berechnet.</p>' +
     '<p class="form-error wide" role="alert" hidden></p></div>';
 }

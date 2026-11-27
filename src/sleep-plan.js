@@ -5,17 +5,20 @@ const clock = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-dig
 const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const scheduledKinds = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht']);
 const planKey = 'lifecase_sleep_plan';
-export const sleepDefaults = Object.freeze({ enabled: true, wake: '07:00', goal: 480, lead: 60 });
+const validTime = value => typeof value === 'string' && timePattern.test(value);
+export const sleepDefaults = Object.freeze({ enabled: true, wake: '07:00', goal: 480, lead: 60,
+  earliestBed: '23:00', latestBed: '02:00' });
 
 export function validSleepPlan(plan) {
-  return typeof plan?.enabled === 'boolean' && typeof plan.wake === 'string' && timePattern.test(plan.wake) &&
+  return typeof plan?.enabled === 'boolean' && validTime(plan.wake) &&
+    validTime(plan.earliestBed) && validTime(plan.latestBed) &&
     Number.isInteger(plan.goal) && plan.goal >= 360 && plan.goal <= 720 && plan.goal % 15 === 0 &&
     Number.isInteger(plan.lead) && plan.lead >= 0 && plan.lead <= 240;
 }
 
 export function sleepPreferences(user) {
-  const stored = user?.user_metadata?.[planKey];
-  return validSleepPlan(stored) ? stored : sleepDefaults;
+  const plan = { ...sleepDefaults, ...user?.user_metadata?.[planKey] };
+  return validSleepPlan(plan) ? plan : sleepDefaults;
 }
 
 export const sleepProfileUpdate = plan => ({ [planKey]: plan });
@@ -52,14 +55,20 @@ export function planSleep(entries, settings, now = new Date()) {
   const first = timed.find(item => item.date === morning && item.startsAt > now.getTime());
   const earlyWake = first ? first.startsAt - settings.lead * 60000 : Infinity;
   const wake = Math.min(normalWake, earlyWake);
-  const bed = wake - settings.goal * 60000;
-  const conflict = timed.find(item => item.startsAt < wake &&
-    (item.startsAt >= bed || (timePattern.test(item.endTime) && localTime(item.endDate || item.date, item.endTime) > bed)));
+  const windowDay = settings.earliestBed < '12:00' ? morning : eveningDay;
+  const lastDay = settings.latestBed < settings.earliestBed ? shiftDate(windowDay, 1) : windowDay;
+  const earliest = localTime(windowDay, settings.earliestBed);
+  const latest = Math.max(earliest, localTime(lastDay, settings.latestBed));
+  const bed = Math.min(Math.max(wake - settings.goal * 60000, earliest), latest);
+  const plannedMinutes = Math.max(0, Math.floor((wake - bed) / 60000));
+  const conflict = plannedMinutes > 0 ? timed.find(item => item.startsAt < wake &&
+    (item.startsAt >= bed || (timePattern.test(item.endTime) && localTime(item.endDate || item.date, item.endTime) > bed))) : null;
   return {
     wakeTime: clock.format(wake), wakeDay: today(new Date(wake)),
     bedTime: clock.format(bed), bedDay: today(new Date(bed)),
-    first: earlyWake < normalWake ? first : null, conflict,
-    minutesLeft: wake > now.getTime() && bed < now.getTime() ? Math.floor((wake - now.getTime()) / 60000) : null,
+    first: earlyWake < normalWake ? first : null, conflict, plannedMinutes,
+    minutesLeft: plannedMinutes > 0 && wake > now.getTime() && bed < now.getTime() ?
+      Math.floor((wake - now.getTime()) / 60000) : null,
     alreadyArose: wake <= now.getTime(), morning,
   };
 }

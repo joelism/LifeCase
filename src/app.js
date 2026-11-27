@@ -570,9 +570,10 @@ function openSleepSettings() {
     const epoch = state.epoch;
     const values = new FormData(form);
     const settings = { enabled: values.has('enabled'), wake: String(values.get('wake') || ''),
-      goal: Number(values.get('goal')), lead: Number(values.get('lead')) };
+      goal: Number(values.get('goal')), lead: Number(values.get('lead')),
+      earliestBed: String(values.get('earliestBed') || ''), latestBed: String(values.get('latestBed') || '') };
     if (!validSleepPlan(settings)) {
-      errorAt(form, userError('Wähle eine Aufstehzeit und ein Schlafziel. Der Puffer darf höchstens 240 Minuten betragen.'));
+      errorAt(form, userError('Wähle gültige Zeiten und ein Schlafziel. Der Puffer darf höchstens 240 Minuten betragen.'));
       return;
     }
     control.disabled = true;
