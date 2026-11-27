@@ -1,12 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { SUPABASE_KEY, SUPABASE_URL } from './config.js';
 import { BUCKET, MAX_FILE, sha256 } from './model.js';
+import { persistsSession } from './session.js';
 
 export const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
     storageKey: 'lifecase-auth-v1',
-    // GitHub project sites share a browser origin with the owner's other apps.
-    persistSession: globalThis.location?.hostname !== 'joelism.github.io',
+    persistSession: persistsSession(globalThis.location?.hostname, globalThis.navigator?.standalone),
     detectSessionInUrl: false,
     flowType: 'pkce',
   },

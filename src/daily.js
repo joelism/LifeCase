@@ -4,10 +4,11 @@ import { dailyData, decideSuggestion, setDailyRules } from './daily-api.js';
 import { itemsOf } from './daily-views.js';
 import { closeDialog, errorAt, openDialog, openRecord } from './editor.js';
 import { icon } from './icons.js';
-import { isActive, MAX_FILE, nameOf, sectionOf, sha256, shiftDate, today } from './model.js';
+import { isActive, MAX_FILE, nameOf, sectionOf, sha256, shiftDate, showDate, today } from './model.js';
 import { button, esc } from './ui.js';
 import { detectAppointments } from '../supabase/functions/lifecase-connect/appointment-intake.js';
 import { planCandidates } from './scan-layout.js';
+import { lunchLabel, shiftWorkdays } from './workday.js';
 
 const initial = () => ({ listId: '', showDone: false, rules: null, runs: [], suggestions: [], error: '', loading: false, checking: false });
 const failureBox = '<p class="form-error wide" role="alert" hidden></p>';
@@ -198,7 +199,7 @@ export function makeDaily(ctx, getAccounts) {
       '<p>' + (scan.candidates.length ? 'Prüfe die erkannten Angaben und entferne Einträge, die du nicht übernehmen möchtest.' :
         'Es wurden keine eindeutigen Angaben erkannt. Du kannst einen Eintrag ergänzen oder das Foto als Dokument ablegen.') + '</p>' +
       input('location', scan.plan ? 'Filiale / Ort' : 'Ort', scan.candidates.find(row => row.location)?.location ?? '', 'maxlength="120"') +
-      '<div id="scan-rows"></div><div class="actions">' + button(scan.plan ? 'Schicht hinzufügen' : 'Termin hinzufügen', 'scan-add-line', '', 'plus') + '</div>' +
+      '<div id="scan-rows"></div>' + (scan.plan ? '<div id="scan-breaks" aria-live="polite"></div>' : '') + '<div class="actions">' + button(scan.plan ? 'Schicht hinzufügen' : 'Termin hinzufügen', 'scan-add-line', '', 'plus') + '</div>' +
       (evidence.length ? '<details><summary>Erkannte Textstellen</summary><div class="mail-content">' + esc(evidence.join('\n')) + '</div></details>' : '') +
       (scan.file ? '<label class="check"><input type="checkbox" name="keepOriginal" checked> Foto im privaten Dokumentenspeicher ablegen</label>' : '') + failureBox;
     const form = openDialog(scan.plan ? 'Schichten prüfen' : 'Termin prüfen', body, button('Abbrechen', 'close') + submit('In LifeCase speichern'), true).querySelector('form');
@@ -215,22 +216,35 @@ export function makeDaily(ctx, getAccounts) {
         '<button type="button" class="text-button" data-scan-remove-line>' + icon('close', 16) + 'Eintrag entfernen</button>';
       rows.append(card);
     };
+    function valuesOf(card) {
+      const get = name => card.querySelector('[name="' + name + '"]').value.trim();
+      return { title: get('title'), date: get('date'), time: get('time'), endTime: get('endTime') };
+    }
+    const workdayPreview = form.querySelector('#scan-breaks');
+    function showBreaks() {
+      if (!workdayPreview) return;
+      const shifts = [...rows.children].map((card, i) => {
+        const fields = valuesOf(card);
+        return { ...fields, row: { id: i, fields }, kind: 'Schicht', state: 'Offen' };
+      }).filter(item => item.title && hasRealDate(item.date));
+      workdayPreview.innerHTML = shiftWorkdays(shifts).map(item => '<p><span class="workday-break">' +
+        icon('sun', 14) + esc(showDate(item.date) + ' · ' + lunchLabel(item.lunch)) + '</span></p>').join('');
+    }
     scan.candidates.forEach(add);
     if (!scan.candidates.length && !scan.file) add();
+    rows.addEventListener('change', showBreaks);
+    showBreaks();
     form.addEventListener('click', event => {
       const control = event.target.closest('button');
       if (control?.hasAttribute('data-scan-add-line')) add();
       if (control?.hasAttribute('data-scan-remove-line')) control.closest('fieldset').remove();
+      showBreaks();
     });
     onSubmit(form, async fields => {
       const location = String(fields.get('location') ?? '').trim();
       const keepOriginal = scan.file && fields.has('keepOriginal');
       const records = [...rows.querySelectorAll('fieldset')].map(card => {
-        const get = name => card.querySelector('[name="' + name + '"]').value.trim();
-        const title = get('title');
-        const time = get('time');
-        const endTime = get('endTime');
-        const date = get('date');
+        const { title, time, endTime, date } = valuesOf(card);
         if (!title || !hasRealDate(date) || (time && !clock.test(time)) || (endTime && (!time || !clock.test(endTime))) ||
             (scan.plan && (!time || !endTime || time === endTime)) || (!scan.plan && endTime && endTime <= time)) {
           throw userError('Prüfe Titel, Datum und Uhrzeit in den gewählten Einträgen.');

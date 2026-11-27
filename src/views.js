@@ -1,5 +1,6 @@
 import { displayedAgenda, providers } from './connected-model.js';
 import { findLunchSlot } from './lunch.js';
+import { groupWorkdays, lunchLabel } from './workday.js';
 import { icon } from './icons.js';
 import { button, empty, esc, jump, options, tag } from './ui.js';
 import { CH_ZONE, calendarEntries, dateOf, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
@@ -71,6 +72,13 @@ function externalRow(item) {
 }
 
 function agendaRow(item) {
+  if (item.shifts) {
+    return '<button type="button" class="row workday-row" data-workday="' + esc(item.row.id) + '">' +
+      '<span class="tile-icon">' + icon('clock', 19) + '</span><span class="row-info"><strong class="row-title">' +
+      esc(nameOf(item.row)) + '</strong><small class="row-sub">' + esc([showDate(item.date), item.time + '–' + item.endTime].join(' · ')) +
+      '</small><span class="workday-break">' + icon('sun', 14) + esc(lunchLabel(item.lunch)) + '</span></span><span class="row-tail">' +
+      icon('right', 15) + '</span></button>';
+  }
   return item.external ? externalRow(item) : recordRow(item.row, '', item);
 }
 
@@ -85,66 +93,47 @@ function shortcut(symbol, label, action, target) {
     icon(symbol, 19) + '</span><span>' + esc(label) + '</span>' + icon('right', 14) + '</button>';
 }
 
-function featuredAppointment(item, day) {
-  if (!item) return '';
-  const entry = item.external;
-  const title = entry ? entry.title : nameOf(item.row);
-  const action = entry ? 'external-open' : 'open';
-  const key = entry ? [entry.provider, entry.id, entry.date].join('|') : item.row.id;
-  const when = [item.date === day ? 'Heute' : showDate(item.date), item.time].filter(Boolean).join(' · ');
-  return '<button type="button" class="hero-next" data-' + action + '="' + esc(key) + '"><span class="hero-next-icon">' + icon('calendar', 19) +
-    '</span><span class="hero-next-copy"><span class="hero-next-label">Nächster Termin</span><strong>' + esc(title) +
-    '</strong><span class="hero-next-time">' + esc(when) + '</span></span>' + icon('right', 16) + '</button>';
-}
-
 export function dashboard(rows, loading, connected, { name = '', suggestions = 0 } = {}) {
   const day = today();
   const active = rows.filter(isActive);
-  const open = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen');
-  const timeline = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
-  const appointmentKinds = ['Termin', 'Gespräch', 'Arztbesuch', 'Schicht'];
-  const appointments = timeline.filter(item => appointmentKinds.includes(item.kind) && item.date >= day);
-  const tasks = timeline.filter(item => planningKinds.includes(item.kind));
-  const undated = active.filter(row => isOpenTask(row) && !value(row, 'date'));
-  const reminders = timeline.filter(item => reminderDue(item, day));
+  const openCases = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen').length;
+  const timeline = groupWorkdays(displayedAgenda(active, connected.events).filter(item => item.state === 'Offen'));
+  const datedTasks = timeline.filter(item => planningKinds.includes(item.kind));
+  const undated = active.filter(row => isOpenTask(row) && !value(row, 'date')).length;
+  const reminders = timeline.filter(item => reminderDue(item, day)).length;
+  const overdue = datedTasks.filter(item => item.date < day).length;
   const upcoming = timeline.filter(item => item.date > day);
-  const overdue = tasks.filter(item => item.date < day);
   const todaysItems = timeline.filter(item => item.date === day);
-  const lunch = !loading && connected.accounts && !connected.calendarLoading && !connected.calendarErrors.length &&
-    todaysItems.filter(item => appointmentKinds.includes(item.kind) && item.external?.busy !== false).length >= 2 ? findLunchSlot(timeline, day) : null;
-  const lunchCard = lunch ? '<section class="lunch-nudge panel"><span class="tile-icon positive">' + icon('sun', 20) +
-    '</span><div><strong>Platz für deine Mittagspause</strong><p>' + esc(lunch.time + '–' + lunch.endTime) +
+  const meetings = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht']);
+  const slot = !loading && connected.accounts && !connected.calendarLoading && !connected.calendarErrors.length &&
+    !todaysItems.some(item => item.lunch) && todaysItems.filter(item => meetings.has(item.kind) && item.external?.busy !== false).length >= 2 ?
+    findLunchSlot(timeline, day) : null;
+  const lunchNudge = slot ? '<section class="lunch-nudge panel"><span class="tile-icon positive">' + icon('sun', 20) +
+    '</span><div><strong>Platz für deine Mittagspause</strong><p>' + esc(slot.time + '–' + slot.endTime) +
     '</p></div>' + button('Vorschlag prüfen', 'assistant-lunch', '', 'arrow') + '</section>' : '';
-  const now = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
-  const next = appointments.find(item => item.date > day || !item.time || item.time >= now);
   const greeting = name ? 'Hey, ' + name : 'Dein Tag';
-  const todayPanel = panel('Heute', todaysItems.length ? todaysItems.slice(0, 8).map(agendaRow).join('') :
-    empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute steht nichts an'), jump('Tagesansicht', 'calendar-today', '', 'calendar'));
-  const upcomingPanel = panel('Als Nächstes', upcoming.length ? upcoming.slice(0, 6).map(agendaRow).join('') :
-    empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge'), jump('Kalender', 'view', 'Kalender'));
-  const glance = '<section class="dash-glance panel"><h2>Im Blick</h2><div class="dash-glance-list">' + [
-    ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
-    ['Aufgaben und Fristen', tasks.length + undated.length, 'tasks', 'positive', 'Meine Woche|'],
-    ['Fällige Erinnerungen', reminders.length, 'bell', 'rose', 'Erinnerungen|'],
-    ['Terminvorschläge', suggestions, 'mail', 'amber', 'Terminprüfung|'],
-  ].map(([label, count, symbol, color, target]) => '<button type="button" class="glance-row" data-metric="' + esc(target) +
-    '"><span class="tile-icon ' + color + '">' + icon(symbol, 16) + '</span><span>' + esc(label) + '</span><strong>' +
-    (loading ? '–' : count) + '</strong>' + icon('right', 14) + '</button>').join('') + '</div></section>';
-  const alerts = (overdue.length ? panel('Überfällige Aufgaben', overdue.slice(0, 4).map(agendaRow).join(''),
-    jump('Alle Aufgaben', 'view', 'Meine Woche')) : '') +
-    (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(agendaRow).join(''),
-      jump('Alle Erinnerungen', 'view', 'Erinnerungen')) : '');
-  return '<section class="dashboard-hero"><div class="hero-copy"><span class="hero-date">' +
-    icon('calendar', 15) + esc(labels.format(new Date())) + '</span><h1>' + esc(greeting) + '</h1><div class="hero-actions">' +
-    button('Terminassistent', 'assistant', '', 'chat', 'hero-cta') + button('Meine Woche', 'view', 'Meine Woche', 'week', 'hero-week') + '</div>' + (!name ?
-      '<button type="button" class="hero-personalize" data-view="Einstellungen">' + icon('people', 17) + 'Begrüssung anpassen' + '</button>' : '') +
-    '</div>' + featuredAppointment(next, day) + '</section><nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
-    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('camera', 'Dokument scannen', 'scan-start', 'document') +
-    shortcut('cart', 'Einkaufen', 'view', 'Einkaufen') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
-    '</nav>' + externalStatus(connected) + lunchCard + '<div class="dashboard-grid"><div class="dashboard-today">' + todayPanel +
-    '</div><aside class="dashboard-side" aria-label="Wichtige Einträge">' + alerts + glance +
-    (open.length ? panel('Aktive Dossiers', open.slice(0, 3).map(row => recordRow(row)).join(''), jump('Alle Fälle', 'view', 'Fälle')) : '') +
-    '</aside><div class="dashboard-upcoming">' + upcomingPanel + '</div></div>';
+  const todayPanel = panel('Heute', todaysItems.length ? todaysItems.slice(0, 4).map(agendaRow).join('') :
+    empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute steht nichts an'), jump('Tagesansicht', 'calendar-today'));
+  const upcomingPanel = panel('Demnächst', upcoming.length ? upcoming.slice(0, 3).map(agendaRow).join('') :
+    empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge'), jump('Zum Kalender', 'view', 'Kalender'));
+  const priorities = [
+    ['Fällige Erinnerungen', reminders, 'bell', 'rose', 'Erinnerungen|'],
+    [overdue ? 'Überfällige Aufgaben' : 'Offene Aufgaben', overdue || datedTasks.length + undated, 'tasks', overdue ? 'amber' : '', 'Meine Woche|'],
+    ['Terminvorschläge', suggestions, 'mail', '', 'Terminprüfung|'],
+    ['Offene Fälle', openCases, 'folder', '', 'Fälle|offen'],
+  ].filter(([, count]) => count > 0);
+  const glance = priorities.length ? '<section class="dash-glance panel"><h2>Im Blick</h2><div class="dash-glance-list">' +
+    priorities.map(([label, count, symbol, color, target]) => '<button type="button" class="glance-row" data-metric="' + esc(target) +
+      '"><span class="tile-icon ' + color + '">' + icon(symbol, 16) + '</span><span>' + esc(label) + '</span><strong>' + count +
+      '</strong>' + icon('right', 14) + '</button>').join('') + '</div></section>' : '';
+  const urgent = reminders || overdue;
+  return '<header class="day-welcome"><div><span class="day-date">' + esc(labels.format(new Date())) +
+    '</span><h1>' + esc(greeting) + '</h1></div>' +
+    button('Meine Woche', 'view', 'Meine Woche', 'week', 'day-week') + '</header>' + externalStatus(connected) +
+    '<div class="dashboard-flow">' + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('chat', 'Terminassistent', 'assistant', '') +
+    shortcut('camera', 'Dokument scannen', 'scan-start', 'document') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
+    '</nav>' + (urgent ? glance : '') + upcomingPanel + (urgent ? '' : glance) + '</div>';
 }
 
 export function sectionPage(section, rows, filter, loading) {
@@ -175,7 +164,7 @@ export function calendarPage(rows, calendar, connected) {
   const first = calendar.month + '-01';
   const dow = (new Date(first + 'T12:00:00Z').getUTCDay() + 6) % 7;
   const start = shiftDate(first, -dow);
-  const matches = displayedAgenda(rows, connected.events).filter(item => {
+  const matches = groupWorkdays(displayedAgenda(rows, connected.events)).filter(item => {
     if (item.external && calendar.source && item.external.provider !== calendar.source) return false;
     if (!item.external && calendar.source && calendar.source !== 'local') return false;
     if (calendar.kind === 'termine') return ['Termin','Gespräch','Arztbesuch'].includes(item.kind) && item.state === 'Offen' && item.date >= day;

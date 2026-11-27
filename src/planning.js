@@ -1,4 +1,5 @@
 import { displayedAgenda } from './connected-model.js';
+import { groupWorkdays } from './workday.js';
 import { isActive, linksOf, nameOf, sectionOf, shiftDate, today, value } from './model.js';
 
 export const planningKinds = ['Aufgabe', 'Frist', 'Wiedervorlage'];
@@ -12,7 +13,7 @@ export function weekPlan(rows, events, start = today(), current = today()) {
   const end = shiftDate(start, 6);
   const active = rows.filter(isActive);
   const agenda = displayedAgenda(active, events).filter(item => item.state === 'Offen');
-  const within = agenda.filter(item => item.date >= start && item.date <= end);
+  const within = groupWorkdays(agenda.filter(item => item.date >= start && item.date <= end));
   const days = Array.from({ length: 7 }, (_, index) => {
     const date = shiftDate(start, index);
     return { date, entries: within.filter(item => item.date === date) };

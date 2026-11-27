@@ -51,7 +51,7 @@ Das Projekt [LifeCaseHealth.xcodeproj](ios/LifeCaseHealth.xcodeproj) in Xcode ö
 
 ### GitHub Pages
 
-GitHub Pages bedient `index.html`, `app.js`, `styles.css` und die PWA-Dateien aus dem Stammverzeichnis von `main`. Die bearbeitbaren Quellen liegen in `web/index.html`, `src/app.js` und `src/styles.css`. `npm run build:pages` erzeugt die veröffentlichten Dateien neu. Auf dem iPhone lässt sich LifeCase über Safari zum Home-Bildschirm hinzufügen und im eigenen App-Fenster öffnen. Die GitHub-Version speichert ihre Anmeldung nur im Arbeitsspeicher, weil mehrere GitHub-Projektseiten dieselbe Browser-Origin teilen.
+GitHub Pages bedient `index.html`, `app.js`, `styles.css` und die PWA-Dateien aus dem Stammverzeichnis von `main`. Die bearbeitbaren Quellen liegen in `web/index.html`, `src/app.js` und `src/styles.css`. `npm run build:pages` erzeugt die veröffentlichten Dateien neu. Auf dem iPhone lässt sich LifeCase über Safari zum Home-Bildschirm hinzufügen und im eigenen App-Fenster öffnen. Auf dem iPhone behält die installierte LifeCase-Web-App ihre Anmeldung im eigenen Speicher. In einem regulären GitHub-Pages-Tab wird die Sitzung im Arbeitsspeicher gehalten, weil mehrere Projektseiten dieselbe Browser-Origin teilen. Nach dem Update einmal im Home-Bildschirm-Modus anmelden.
 
 ## LifeCase 2.1
 

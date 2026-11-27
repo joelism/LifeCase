@@ -1,5 +1,6 @@
 import { archive, findRecord, message, saveRecord, userError } from './backend.js';
 import { providers } from './connected-model.js';
+import { lunchLabel } from './workday.js';
 import { closeDialog, editRecord, errorAt, openDialog } from './editor.js';
 import { icon } from './icons.js';
 import { CH_ZONE, isActive, nameOf, sectionOf, shiftDate, showDate, today, value } from './model.js';
@@ -18,9 +19,9 @@ export function renderWeek(plan, state, allRows, connected) {
   const current = today();
   const entry = (item, showDay = false) => {
     const row = item.row;
-    const result = preparationSource(item);
+    const result = item.shifts ? null : preparationSource(item);
     const prep = result && allRows.find(item => sectionOf(item) === 'Vorbereitung' && isActive(item) && value(item, 'subjectKey') === result.key);
-    const action = row ? 'open' : 'external-open';
+    const action = item.shifts ? 'workday' : row ? 'open' : 'external-open';
     const key = row ? row.id : eventKey(item.external);
     const isTask = row && isOpenTask(row);
     const info = [showDay ? showDate(item.date) : '', [item.time, item.endTime].filter(Boolean).join('–'),
@@ -30,7 +31,7 @@ export function renderWeek(plan, state, allRows, connected) {
       '<span class="tile-icon ' + (item.kind === 'Frist' ? 'amber' : '') + '">' + icon(calendarSymbols[item.kind] || 'calendar', 17) + '</span>';
     const prepareLabel = prep ? (value(prep, 'status') === 'Bereit' ? 'Vorbereitet' : 'Vorbereitung') : 'Vorbereiten';
     return '<div class="week-entry">' + check + '<button type="button" class="week-entry-main" data-' + action + '="' + esc(key) +
-      '"><strong>' + esc(itemName(item)) + '</strong><small>' + esc(info) + '</small></button><div class="week-entry-actions">' +
+      '"><strong>' + esc(itemName(item)) + '</strong><small>' + esc(info) + '</small>' + (item.lunch ? '<span class="workday-break">' + icon('sun', 14) + esc(lunchLabel(item.lunch)) + '</span>' : '') + '</button><div class="week-entry-actions">' +
       (item.spacing ? tag(item.spacing, item.spacing === 'Knapp' ? 'amber' : 'rose') : '') +
       (result ? button(prepareLabel, row ? 'planner-prepare' : 'planner-external', key, value(prep || { fields: {} }, 'status') === 'Bereit' ? 'check' : 'tasks') : '') + '</div></div>';
   };

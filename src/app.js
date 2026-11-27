@@ -11,7 +11,8 @@ import { db, downloadBlob, files, get, message, records, userError } from './bac
 import { calendarFile } from './calendar-file.js';
 import { bindRecordActions, closeDialog, editRecord, errorAt, openDialog, openRecord } from './editor.js';
 import { icon } from './icons.js';
-import { calendarEntries, nameOf, recordSections, reminderDue, sectionOf, sections, today, value } from './model.js';
+import { calendarEntries, nameOf, recordSections, reminderDue, sectionOf, sections, showDate, today, value } from './model.js';
+import { lunchLabel, shiftWorkdays } from './workday.js';
 import { cleanDisplayName, profileName, profileUpdate } from './profile.js';
 import { button, empty, esc } from './ui.js';
 import { brand, calendarPage, dashboard, exportCandidates, exportControls, exportKinds, exportList, heading, panel, recordRow, searchControls, searchResults, sectionPage, selectedCalendar, shell } from './views.js';
@@ -127,7 +128,8 @@ function authPage() {
     '<label class="input-wrap">E-Mail-Adresse<input name="email" type="email" autocomplete="username" value="' + esc(state.email) + '" required></label>' +
     '<label class="input-wrap">Passwort<input name="password" type="password" autocomplete="current-password" required></label>' +
     formError + '<button type="submit" class="button primary">Anmelden ' + icon('arrow', 17) + '</button></form>' +
-    (isStandalone() ? '' : '<div class="auth-install">' + button('LifeCase installieren', 'install', '', 'download') + '</div>');
+    (isStandalone() ? '' : '<div class="auth-install">' + button('LifeCase installieren', 'install', '', 'download') +
+      (/iPhone|iPad/.test(navigator.userAgent) ? '<p>Starte LifeCase vom Home-Bildschirm, damit deine Anmeldung gespeichert wird.</p>' : '') + '</div>');
   else if (setupError) content = '<h1>Sicherheitsprüfung</h1>' + publicEmail() + '<p>Der zweite Faktor konnte nicht geladen werden.</p>' +
     button('Erneut versuchen', 'retry-auth', '', 'refresh', 'primary') + button('Abmelden', 'signout', '', 'logout');
   else {
@@ -481,6 +483,14 @@ document.addEventListener('click', async event => {
   } else if ('quick' in action) quick();
   else if ('assistant' in action || 'assistantLunch' in action) assistant.open('assistantLunch' in action);
   else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);
+  else if ('workday' in action) {
+    const workday = shiftWorkdays(calendarEntries(state.rows)).find(item => item.row.id === action.workday);
+    if (!workday) return;
+    openDialog(nameOf(workday.row), '<p class="workday-dialog-date">' + esc(showDate(workday.date)) + '</p><div class="workday-break">' +
+      icon('sun', 16) + esc(lunchLabel(workday.lunch)) + '</div><p class="hint">Aus den Schichtzeiten im Arbeitsplan erkannt.</p>' +
+      '<div class="workday-blocks">' + workday.shifts.map(shift => button(shift.time + '–' + shift.endTime, 'open', shift.row.id, 'clock')).join('') +
+      '</div>', button('Schliessen', 'close'));
+  }
   else if ('open' in action) {
     const item = state.rows.find(row => row.id === action.open);
     if (item && sectionOf(item) === 'Einkaufen') {

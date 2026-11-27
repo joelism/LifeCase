@@ -5,6 +5,7 @@ import { displayedAgenda, expandEvents, providers } from './connected-model.js';
 import { openDialog } from './editor.js';
 import { icon } from './icons.js';
 import { findLunchSlot, lunchRequest, lunchSlotIsFree } from './lunch.js';
+import { lunchLabel, shiftWorkdays } from './workday.js';
 import { nameOf, shiftDate, showDate, sha256, today } from './model.js';
 import { button, esc, options } from './ui.js';
 
@@ -48,8 +49,15 @@ export function makeAssistant(ctx, currentAccounts) {
       add('assistant', 'Wähle für die Mittagspause eine Dauer zwischen 15 und 120 Minuten.');
       return;
     }
-    const result = await agendaFor(request.date, true);
+    const result = await agendaFor(request.date);
     if (epoch !== ctx.epoch()) return;
+    const scheduled = shiftWorkdays(result.entries.filter(item => item.date === request.date));
+    if (scheduled.length) {
+      proposal = null;
+      add('assistant', 'Laut Arbeitsplan am ' + showDate(request.date) + ': ' + scheduled.map(item => lunchLabel(item.lunch)).join(', ') + '.');
+      return;
+    }
+    if (result.incomplete) throw userError('Ein Kalender ist gerade nicht erreichbar. Versuche die Prüfung erneut.');
     const slot = findLunchSlot(result.entries, request.date, { duration: request.duration, after });
     if (!slot) {
       proposal = null;
@@ -77,7 +85,7 @@ export function makeAssistant(ctx, currentAccounts) {
       add('assistant', 'Diese Mittagspause ist bereits eingetragen.', previous.row?.id);
       return;
     }
-    if (!lunchSlotIsFree(result.entries, candidate)) {
+    if (shiftWorkdays(result.entries.filter(item => item.date === candidate.date)).length || !lunchSlotIsFree(result.entries, candidate)) {
       proposal = null;
       add('assistant', 'Die Zeit ist inzwischen belegt oder bereits vorbei. Ich prüfe eine andere Lücke.');
       await suggestLunch({ date: candidate.date, duration: candidate.duration }, epoch);
