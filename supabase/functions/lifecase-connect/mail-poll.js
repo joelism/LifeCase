@@ -1,5 +1,5 @@
 import { detectAppointments } from './appointment-intake.js';
-import { listIncomingMail, messageDetail, providers } from './providers.js';
+import { listIncomingMail, messageDetail } from './providers.js';
 
 const hour = 3600000;
 const swissDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Zurich', dateStyle: 'short' });
@@ -20,7 +20,7 @@ export async function pollRules(service, loadLink, owner = '') {
   let suggested = 0;
   let failed = 0;
   for (const rule of rules) {
-    const results = await Promise.all(Object.keys(providers).map(provider => pollProvider(service, loadLink, rule, provider)));
+    const results = await Promise.all(['microsoft', 'google'].map(provider => pollProvider(service, loadLink, rule, provider)));
     for (const result of results) {
       if (!result) continue;
       checked += result.checked;

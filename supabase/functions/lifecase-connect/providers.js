@@ -1,5 +1,7 @@
 const graph = 'https://graph.microsoft.com/v1.0/';
 const gmail = 'https://gmail.googleapis.com/gmail/v1/users/me/';
+const driveApi = 'https://www.googleapis.com/drive/v3/';
+const folderType = 'application/vnd.google-apps.folder';
 const googleCalendar = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
 const googleCalendars = 'https://www.googleapis.com/calendar/v3/calendars/';
 const zone = 'Europe/Zurich';
@@ -11,6 +13,8 @@ const maximumFile = 10 * 1024 * 1024;
 export const providers = {
   google: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token',
     scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly' },
+  drive: { authorize: 'https://accounts.google.com/o/oauth2/v2/auth', token: 'https://oauth2.googleapis.com/token',
+    scope: 'https://www.googleapis.com/auth/drive.readonly' },
   microsoft: { authorize: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize',
     token: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
     scope: 'offline_access https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Calendars.Read' },
@@ -44,7 +48,7 @@ export function authorizationUrl(provider, cfg, callback, state, challenge) {
   return withQuery(providers[provider].authorize, {
     client_id: cfg.client_id, redirect_uri: callback, response_type: 'code', scope: providers[provider].scope,
     code_challenge: challenge, code_challenge_method: 'S256', state,
-    ...(provider === 'google' ? { access_type: 'offline', prompt: 'consent select_account' } : { prompt: 'select_account' }),
+    ...(provider !== 'microsoft' ? { access_type: 'offline', prompt: 'consent select_account' } : { prompt: 'select_account' }),
   });
 }
 export async function exchange(provider, cfg, params, oldRefresh = '') {
@@ -63,6 +67,11 @@ export async function exchange(provider, cfg, params, oldRefresh = '') {
   return { access: data.access_token, refresh, expires: Date.now() + Number(data.expires_in || 3600) * 1000 };
 }
 export async function profile(provider, access) {
+  if (provider === 'drive') {
+    const { user } = await getJson(withQuery(driveApi + 'about', { fields: 'user(emailAddress,permissionId)' }), access);
+    if (!user?.emailAddress) throw new Failure(502, 'Das Drive-Konto konnte nicht gelesen werden.');
+    return { account: user.emailAddress.toLowerCase(), email: user.emailAddress };
+  }
   if (provider === 'google') {
     const data = await getJson(gmail + 'profile', access);
     if (!data.emailAddress) throw new Failure(502, 'Das Google-Konto konnte nicht gelesen werden.');
@@ -158,10 +167,10 @@ function checkedFile(bytes) {
   if (bytes.length > maximumFile) throw new Failure(413, 'Diese Originaldatei ist grösser als 10 MB.');
   return bytes;
 }
-async function readBinary(response) {
-  if (Number(response.headers.get('content-length')) > maximumFile) {
+async function readBinary(response, limit = maximumFile, label = '10 MB') {
+  if (Number(response.headers.get('content-length')) > limit) {
     await response.body?.cancel();
-    throw new Failure(413, 'Diese Originaldatei ist grösser als 10 MB.');
+    throw new Failure(413, 'Diese Originaldatei ist grösser als ' + label + '.');
   }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
@@ -172,9 +181,9 @@ async function readBinary(response) {
       const { value, done } = await reader.read();
       if (done) break;
       size += value.length;
-      if (size > maximumFile) {
+      if (size > limit) {
         await reader.cancel();
-        throw new Failure(413, 'Diese Originaldatei ist grösser als 10 MB.');
+        throw new Failure(413, 'Diese Originaldatei ist grösser als ' + label + '.');
       }
       chunks.push(value);
     }
@@ -222,7 +231,8 @@ function calendarEvent(provider, entry, calendarId) {
   const exclusive = allDay ? (google ? entry.end?.date : entry.end?.dateTime?.slice(0, 10)) : '';
   const endDate = exclusive ? daysAfter(exclusive, -1) : (endStamp ? localDayAndTime(new Date(Date.parse(endStamp) - 1))?.date : start.date);
   return { provider, id: calendarId + ':' + entry.id, title: (google ? entry.summary : entry.subject) || '(Ohne Titel)',
-    date: start.date, time: start.time, endDate: endDate && endDate >= start.date ? endDate : start.date, allDay,
+    date: start.date, time: start.time, endTime: allDay ? '' : localDayAndTime(endStamp)?.time || '',
+    timeEndDate: allDay ? '' : localDayAndTime(endStamp)?.date || '', endDate: endDate && endDate >= start.date ? endDate : start.date, allDay,
     location: (google ? entry.location : entry.location?.displayName) || '' };
 }
 async function pages(first, provider, access, itemsKey, maximum = 8) {
@@ -278,4 +288,35 @@ export async function listIncomingMail(provider, access, since, limit) {
     $top: limit, $select: 'id,receivedDateTime', $filter: 'receivedDateTime ge ' + since.toISOString(), $orderby: 'receivedDateTime asc',
   }), access);
   return (data.value ?? []).map(row => ({ id: row.id, date: row.receivedDateTime }));
+}
+
+function driveQueryText(text) {
+  return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+export async function listDriveFiles(access, folder, query, cursor) {
+  const supported = "(mimeType = 'application/pdf' or mimeType contains 'image/' or mimeType = '" + folderType + "')";
+  const conditions = ["trashed = false", supported];
+  if (query) conditions.push("name contains '" + driveQueryText(query) + "'");
+  else conditions.push("'" + (folder || 'root') + "' in parents");
+  const rows = await getJson(withQuery(driveApi + 'files', {
+    q: conditions.join(' and '), pageSize: 50, pageToken: cursor, orderBy: 'folder,name_natural',
+    fields: 'nextPageToken,files(id,name,mimeType,size,modifiedTime,capabilities(canDownload))',
+    spaces: 'drive',
+  }), access);
+  return { rows: (rows.files ?? []).map(item => ({
+    id: item.id, name: item.name, mime: item.mimeType, size: Number(item.size || 0),
+    date: item.modifiedTime, folder: item.mimeType === folderType, canDownload: item.capabilities?.canDownload !== false,
+  })), next: rows.nextPageToken || '' };
+}
+
+export async function driveOriginal(access, id) {
+  const url = driveApi + 'files/' + identity(id);
+  const info = await getJson(withQuery(url, { fields: 'id,mimeType,size,trashed,capabilities(canDownload)' }), access);
+  if (info.trashed || !['application/pdf'].includes(info.mimeType) && !info.mimeType?.startsWith('image/')) {
+    throw new Failure(415, 'Wähle ein PDF oder Bild aus Drive.');
+  }
+  if (info.capabilities?.canDownload === false) throw new Failure(403, 'Google Drive erlaubt das Herunterladen dieser Datei nicht.');
+  if (Number(info.size) > 20 * 1024 * 1024) throw new Failure(413, 'Diese Originaldatei ist grösser als 20 MB.');
+  return readBinary(await providerRequest(withQuery(url, { alt: 'media' }), access), 20 * 1024 * 1024, '20 MB');
 }

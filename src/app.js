@@ -1,3 +1,6 @@
+import { makeAssistant } from './assistant-chat.js';
+import { makeDrive } from './drive.js';
+import { disablePush, enablePush, pushEnabled, pushSupported } from './push.js';
 import { makeDaily } from './daily.js';
 import { everydayActions, mailReview, scanPage, shoppingPage } from './daily-views.js';
 import { makeConnections } from './connections.js';
@@ -24,7 +27,7 @@ const state = {
   search: defaults(), export: { ...defaults(), kind: 'all' }, excluded: new Set(), includeFiles: true,
 };
 const ctx = {
-  calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
+  accountsLoaded: () => drive.activate(), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
   rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
@@ -32,6 +35,9 @@ const ctx = {
 };
 const connected = makeConnections(ctx);
 const daily = makeDaily(ctx, () => connected.state.accounts);
+const assistant = makeAssistant(ctx, () => connected.state.accounts);
+const drive = makeDrive(ctx, () => connected.state.accounts, () => connected.status(true));
+let devicePush = false;
 let noticeTimer;
 let syncVersion = 0;
 let installPrompt;
@@ -70,6 +76,9 @@ function cleared() {
   state.menu = false;
   connected.reset();
   daily.reset();
+  assistant.reset();
+  drive.reset();
+  devicePush = false;
   notice.textContent = '';
   closeDialog(true);
 }
@@ -124,6 +133,8 @@ function mainView() {
   if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, everydayActions(state.rows, daily.state));
   if (state.view === 'Einkaufen') return shoppingPage(state.rows, daily.state);
   if (state.view === 'Scannen') return scanPage(state.rows);
+  if (state.view === 'Google Drive') return drive.view();
+  if (state.view === 'Erinnerungen') return reminderPage();
   if (state.view === 'Terminprüfung') return mailReview(daily.state, connected.state.accounts);
   if (state.view === 'Posteingang') return mailboxView(connected.state);
   if (state.view === 'Verbindungen') return connectionsView(connected.state);
@@ -154,6 +165,8 @@ function go(view, filter = '', focus = true) {
   window.scrollTo(0, 0);
   connected.activate();
   if (view === 'Terminprüfung') daily.load(true);
+  if (view === 'Google Drive') drive.activate();
+  if (view === 'Erinnerungen') refreshPush();
   if (focus) document.querySelector(view === 'Suche' ? '#search-query' : '#main')?.focus({ preventScroll: true });
 }
 function showCalendarDate(date, filter = '') {
@@ -184,7 +197,7 @@ async function sync(showNotice = false) {
     if (epoch === state.epoch && revision === syncVersion) {
       state.loading = false;
       const shoppingDraft = state.view === 'Einkaufen' && app.querySelector('#shop-add-form input[name="name"]')?.value;
-      if ((!shoppingDraft && !['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen', 'Terminprüfung'].includes(state.view)) || showNotice) render();
+      if ((!shoppingDraft && !['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen', 'Terminprüfung', 'Google Drive'].includes(state.view)) || showNotice) render();
       else refreshResults();
     }
   }
@@ -220,6 +233,12 @@ async function acceptSession(session) {
     render();
     connected.activate();
     connected.consumeReturn();
+    const url = new URL(location.href);
+    if (url.searchParams.get('lcView') === 'reminders') {
+      url.searchParams.delete('lcView');
+      history.replaceState(null, '', url);
+      go('Erinnerungen');
+    }
     await sync();
   }
 }
@@ -267,6 +286,7 @@ function bindAuth() {
 }
 async function signOut() {
   try {
+    await disablePush().catch(() => {});
     const result = await db.auth.signOut({ scope: 'local' });
     if (result.error) throw result.error;
     await acceptSession(null);
@@ -320,17 +340,47 @@ function quick() {
   openDialog('Eintrag erfassen', '<div class="quick-grid">' + recordSections.map(section =>
     button(sections[section].create, 'create', section, sections[section].icon)).join('') + '</div>');
 }
-function reminderList() {
-  const due = calendarEntries(state.rows).filter(item => reminderDue(item, today()));
-  openDialog('Erinnerungen', (due.length ? '<div class="panel">' + due.map(item => recordRow(item.row, '', item)).join('') + '</div>' :
-    empty('bell', 'Keine fälligen Erinnerungen')) + '<p class="hint">Plane Erinnerungen im Kalender oder direkt beim Arztzeugnis.</p>',
-    button('Zum Kalender', 'view', 'Kalender', 'calendar', 'primary'));
+async function refreshPush() {
+  const epoch = state.epoch;
+  const enabled = await pushEnabled().catch(() => false);
+  if (epoch !== state.epoch || devicePush === enabled) return;
+  devicePush = enabled;
+  if (state.view === 'Erinnerungen') render();
+}
+function reminderPage() {
+  const all = calendarEntries(state.rows);
+  const due = all.filter(item => reminderDue(item, today()));
+  const expiring = all.filter(item => item.reminderDate && item.date >= today());
+  const dateAction = expiring.length ? button('Ablaufdaten als Kalenderdatei', 'ics', 'expiries', 'download') : '';
+  const canPush = pushSupported();
+  const pushAction = canPush ? button(devicePush ? 'Push auf diesem Gerät deaktivieren' : 'Push auf diesem Gerät aktivieren',
+    devicePush ? 'push-disable' : 'push-enable', '', 'bell', devicePush ? '' : 'primary') : '';
+  return heading('Erinnerungen', dateAction) + panel('Jetzt fällig', due.length ? due.map(item => recordRow(item.row, '', item)).join('') :
+    empty('bell', 'Keine fälligen Erinnerungen')) +
+    panel('Auf diesem Gerät', '<div class="panel-body settings-content"><p>' + (canPush ?
+      'LifeCase meldet den Ablauf von Rezepten und Arztzeugnissen einen Kalendermonat vorher. Die Push-Nachricht zeigt keine Gesundheitsdetails.' :
+      'Auf dem iPhone kannst du Push aktivieren, wenn du LifeCase in Safari zum Home-Bildschirm hinzufügst und es von dort öffnest.') + '</p>' +
+      (pushAction ? '<div class="actions">' + pushAction + '</div>' : '') + '</div>');
+}
+async function changePush(control, enabled) {
+  control.disabled = true;
+  const epoch = state.epoch;
+  try {
+    if (enabled) await enablePush();
+    else await disablePush();
+    if (epoch === state.epoch) {
+      devicePush = enabled;
+      render();
+      notify(enabled ? 'Push-Erinnerungen auf diesem Gerät aktiviert.' : 'Push-Erinnerungen auf diesem Gerät deaktiviert.');
+    }
+  } catch (error) { if (epoch === state.epoch) notify(message(error)); }
+  finally { control.disabled = false; }
 }
 function pdfItem(id) {
   const row = state.rows.find(item => item.id === id);
   if (!row) return;
   const section = sectionOf(row);
-  state.export = { ...defaults(), kind: { Fälle:'case', Gespräche:'talks', Gesundheit:'health', Arztzeugnisse:'health', Chronik:'history' }[section] || 'all',
+  state.export = { ...defaults(), kind: { Fälle:'case', Gespräche:'talks', Gesundheit:'health', Arztzeugnisse:'health', Rezepte:'health', Chronik:'history' }[section] || 'all',
     caseId: section === 'Fälle' ? id : '', archived: Boolean(row.archived_at) };
   state.excluded = new Set(section === 'Fälle' ? [] : state.rows.filter(item => item.id !== id).map(item => item.id));
   go('PDF-Export');
@@ -358,7 +408,8 @@ async function exportPdf(control) {
   }
 }
 function ics(id) {
-  const base = id === 'agenda' ? selectedCalendar(state.rows, state.calendar) : calendarEntries(state.rows).filter(item => item.row.id === id);
+  const base = id === 'agenda' ? selectedCalendar(state.rows, state.calendar) : calendarEntries(state.rows).filter(item =>
+    id === 'expiries' ? item.reminderDate && item.date >= today() : item.row.id === id);
   const items = base.filter(item => item.state === 'Offen');
   if (!items.length) {
     notify('Für diese Auswahl sind keine offenen Termine verfügbar.');
@@ -384,7 +435,7 @@ document.addEventListener('click', async event => {
   if ('signout' in action) { await signOut(); return; }
   if ('retryAuth' in action) { await acceptSession(state.session); return; }
   if (!state.verified) return;
-  if (daily.click(action) || connected.click(action)) return;
+  if (daily.click(action) || drive.handle(action) || connected.click(action)) return;
   if ('close' in action) closeDialog();
   else if ('view' in action) go(action.view);
   else if ('metric' in action) go(...action.metric.split('|'));
@@ -394,7 +445,8 @@ document.addEventListener('click', async event => {
     render();
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
-  else if ('reminders' in action) reminderList();
+  else if ('assistant' in action) assistant.open();
+  else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);
   else if ('open' in action) {
     const item = state.rows.find(row => row.id === action.open);
     if (item && sectionOf(item) === 'Einkaufen') {
@@ -444,6 +496,7 @@ app.addEventListener('input', handleFilter);
 app.addEventListener('change', handleFilter);
 app.addEventListener('submit', event => {
   daily.submitPage(event);
+  drive.submit(event);
   if (event.target.matches('#search-form,#export-form')) event.preventDefault();
   if (event.target.matches('#mail-search')) {
     event.preventDefault();
@@ -492,3 +545,8 @@ try {
   await acceptSession(null);
   notify(message(error));
 }
+
+navigator.serviceWorker?.addEventListener('message', event => {
+  if (!state.verified || event.data?.type !== 'open-reminders') return;
+  go('Erinnerungen');
+});

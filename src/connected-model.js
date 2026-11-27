@@ -1,3 +1,4 @@
+import { markCalendarSpacing } from './calendar-assistant.js';
 import { calendarEntries, shiftDate } from './model.js';
 
 export const providers = {
@@ -6,9 +7,9 @@ export const providers = {
 };
 
 export function displayedAgenda(rows, external = []) {
-  return [...calendarEntries(rows), ...external.map(event => ({
-    external: event, date: event.date, time: event.time, kind: 'Termin', state: 'Offen',
-  }))].sort((a, b) => (a.date + (a.time || '00:00')).localeCompare(b.date + (b.time || '00:00')));
+  return markCalendarSpacing([...calendarEntries(rows), ...external.map(event => ({
+    external: event, date: event.date, time: event.time, endTime: event.endTime, endDate: event.timeEndDate, kind: 'Termin', state: 'Offen',
+  }))].sort((a, b) => (a.date + (a.time || '00:00')).localeCompare(b.date + (b.time || '00:00'))));
 }
 
 export function expandEvents(events, from, through) {

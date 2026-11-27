@@ -19,3 +19,30 @@ self.addEventListener('fetch', event => {
   }
   if (urls.has(url.href)) event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(response => response || fetch(event.request)));
 });
+
+self.addEventListener('push', event => {
+  let kind;
+  try { kind = event.data?.json()?.kind; } catch { return; }
+  if (kind !== 'expiry') return;
+  event.waitUntil(self.registration.showNotification('LifeCase · Ablauferinnerung', {
+    body: 'Ein Dokument läuft demnächst ab. Öffne LifeCase für die Einzelheiten.',
+    icon: new URL('icon-192.png', root).href,
+    tag: 'lifecase-document-expiry',
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  if (event.notification.tag !== 'lifecase-document-expiry') return;
+  event.notification.close();
+  event.waitUntil((async () => {
+    const pages = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const current = pages.find(page => new URL(page.url).pathname === root.pathname);
+    if (current) {
+      await current.focus();
+      current.postMessage({ type: 'open-reminders' });
+    } else {
+      const url = new URL(root);
+      url.searchParams.set('lcView', 'reminders');
+      await self.clients.openWindow(url.href);
+    }
+  })());
+});

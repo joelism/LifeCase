@@ -17,8 +17,10 @@ const reminder = field('reminderDays', 'Erinnerung vorher', 'select', {
   choices: ['', '0', '1', '2', '3', '7', '14', '30'], initial: '',
   labels: { '': 'Keine Erinnerung', 0: 'Am selben Tag', 1: '1 Tag', 2: '2 Tage', 3: '3 Tage', 7: '7 Tage', 14: '14 Tage', 30: '30 Tage' },
 });
+const expiryReminder = select('expiryReminder', 'Ablauferinnerung', ['month', 'off']);
+expiryReminder.labels = { month: 'Einen Monat vorher', off: 'Ausgeschaltet' };
 const location = field('location', 'Ort');
-const sectionsInArchive = ['Fälle', 'Chronik', 'Gesundheit', 'Arztzeugnisse', 'Gespräche', 'Kalender', 'Beweismittel', 'Personen'];
+const sectionsInArchive = ['Fälle', 'Chronik', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gespräche', 'Kalender', 'Beweismittel', 'Personen'];
 
 export const sections = {
   'Übersicht': { icon: 'grid', description: 'Offene Fälle, nächste Termine und aktuelle Fristen.' },
@@ -40,7 +42,13 @@ export const sections = {
   'Arztzeugnisse': {
     icon: 'badge', noun: 'Arztzeugnis', create: 'Neues Arztzeugnis', empty: 'Noch keine Arztzeugnisse',
     description: 'Gültigkeit, Arbeitsunfähigkeit und Originalzeugnisse.',
-    fields: [title(), date('validFrom', 'Gültig ab', true), date('validUntil', 'Gültig bis', true), field('incapacity', 'Arbeitsunfähigkeit (%)', 'number', { min: 0, max: 100, step: 0.1, required: true }), field('doctor', 'Ausstellende Ärztin / ausstellender Arzt'), reminder, notes('notes', 'Notizen'), cases, doctors, documents],
+    fields: [title(), date('validFrom', 'Gültig ab', true), date('validUntil', 'Gültig bis', true), field('incapacity', 'Arbeitsunfähigkeit (%)', 'number', { min: 0, max: 100, step: 0.1, required: true }), field('doctor', 'Ausstellende Ärztin / ausstellender Arzt'), expiryReminder, { ...reminder, label: 'Weitere Erinnerung vorher' }, notes('notes', 'Notizen'), cases, doctors, documents],
+  },
+  'Rezepte': {
+    icon: 'file', noun: 'Rezept', create: 'Neues Rezept', empty: 'Noch keine Rezepte',
+    description: 'Rezepte, Belege und ihre Gültigkeit verwalten.',
+    fields: [title('Name des Rezepts'), date('validFrom', 'Gültig ab'), date('validUntil', 'Gültig bis', true), field('doctor', 'Ausstellende Stelle'),
+      field('dosage', 'Angabe auf dem Rezept'), expiryReminder, notes('notes', 'Notizen'), cases, doctors, documents],
   },
   'Gespräche': {
     icon: 'message', noun: 'Gespräch', create: 'Neues Gespräch', empty: 'Noch keine Gespräche',
@@ -50,7 +58,7 @@ export const sections = {
   'Kalender': {
     icon: 'calendar', noun: 'Kalendereintrag', create: 'Neuer Kalendereintrag', empty: 'Noch keine Kalendereinträge',
     description: 'Termine, Aufgaben, Fristen und Erinnerungen an einem Ort.',
-    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Chronik', 'Gesundheit', 'Beweismittel'])],
+    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Rezepte', 'Chronik', 'Gesundheit', 'Beweismittel'])],
   },
   'Beweismittel': {
     icon: 'shield', noun: 'Beweismittel', create: 'Neues Beweismittel', empty: 'Noch keine Beweismittel',
@@ -67,6 +75,8 @@ export const sections = {
   'Terminprüfung': { icon: 'mail', description: 'E-Mail-Termine automatisch erfassen und Vorschläge prüfen.' },
   'Gesundheitsdaten': { icon: 'activity', description: 'Tageswerte aus Apple Health und ihr Verlauf.' },
   'Posteingang': { icon: 'mail', description: 'Wichtige E-Mails und Anhänge in deinen Dossiers ablegen.' },
+  'Erinnerungen': { icon: 'bell', description: 'Fällige Erinnerungen und Ablaufdaten im Blick behalten.' },
+  'Google Drive': { icon: 'folder', description: 'Scans und Originaldateien aus deinem Google Drive in LifeCase ablegen.' },
   'Verbindungen': { icon: 'link', description: 'Konten und Datenquellen für LifeCase verwalten.' },
   'Suche': { icon: 'search', description: 'Einträge, Originaldateien und verknüpfte Inhalte finden.' },
   'PDF-Export': { icon: 'download', description: 'Dossiers und Übersichten mit den gewünschten Inhalten erstellen.' },
@@ -101,6 +111,12 @@ export function shiftDate(day, offset) {
   const shifted = new Date(day + 'T12:00:00Z');
   shifted.setUTCDate(shifted.getUTCDate() + offset);
   return shifted.toISOString().slice(0, 10);
+}
+export function monthBefore(date) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date))) return '';
+  const [year, month, day] = date.split('-').map(Number);
+  const previousMonthLastDay = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month - 2, Math.min(day, previousMonthLastDay))).toISOString().slice(0, 10);
 }
 export function dayDistance(from, to) {
   return Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
@@ -148,10 +164,15 @@ export function calendarEntries(records) {
     const kind = value(row, 'kind') || 'Termin';
     const state = value(row, 'status') || 'Offen';
     if (section === 'Kalender' && value(row, 'date')) {
-      return [{ row, date: value(row, 'date'), time: value(row, 'time'), endTime: value(row, 'endTime'), kind, state, reminderDays: value(row, 'reminderDays') }];
+      return [{ row, date: value(row, 'date'), time: value(row, 'time'), endTime: value(row, 'endTime'), endDate: value(row, 'endDate'), kind, state, reminderDays: value(row, 'reminderDays') }];
     }
-    if (section === 'Arztzeugnisse' && value(row, 'validUntil')) {
-      return [{ row, date: value(row, 'validUntil'), time: '', kind: 'Arztzeugnis', state: 'Offen', reminderDays: value(row, 'reminderDays') }];
+    if (['Arztzeugnisse', 'Rezepte'].includes(section) && value(row, 'validUntil')) {
+      const date = value(row, 'validUntil');
+      const reminderDate = value(row, 'expiryReminder') === 'off' ? '' : monthBefore(date);
+      const additional = value(row, 'reminderDays');
+      return [{ row, date, time: '', kind: section === 'Rezepte' ? 'Rezept' : 'Arztzeugnis', state: 'Offen',
+        reminderDate, reminderDays: reminderDate ? String(dayDistance(reminderDate, date)) : additional,
+        extraReminderDays: reminderDate ? additional : '' }];
     }
     if (section === 'Gespräche' && state !== 'Abgesagt') {
       const entries = [];
@@ -167,6 +188,7 @@ export function calendarEntries(records) {
 }
 export function reminderDue(item, current) {
   if (item.state !== 'Offen' || !item.date) return false;
+  if (item.reminderDate && current >= item.reminderDate && current <= item.date) return true;
   if (item.kind === 'Erinnerung' && item.date <= current) return true;
   if (item.reminderDays === '' || item.reminderDays == null || !/^\d+$/.test(item.reminderDays)) return false;
   return current >= shiftDate(item.date, -Number(item.reminderDays)) && current <= item.date;

@@ -43,20 +43,21 @@ export function makeConnections(ctx) {
     if (state.statusLoading || (!force && Date.now() - lastStatus < 120000)) return;
     const epoch = ctx.epoch();
     state.statusLoading = true;
-    update(['Verbindungen', 'Posteingang', 'Terminprüfung']);
+    update(['Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive']);
     try {
       const result = await connection('status');
       if (epoch !== ctx.epoch()) return;
       state.accounts = result.accounts;
       state.callback = result.callback;
       state.error = '';
+      ctx.accountsLoaded();
       lastStatus = Date.now();
     } catch (error) {
       if (epoch === ctx.epoch()) state.error = message(error);
     } finally {
       if (epoch === ctx.epoch()) {
         state.statusLoading = false;
-        update(['Verbindungen', 'Posteingang', 'Terminprüfung']);
+        update(['Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive']);
         if (ctx.view() === 'Posteingang') ensureMail();
         if (['Übersicht', 'Kalender'].includes(ctx.view())) agenda();
       }
@@ -155,7 +156,7 @@ export function makeConnections(ctx) {
   function activate() {
     const view = ctx.view();
     if (view === 'Gesundheitsdaten') return loadHealth(true);
-    if (!['Übersicht', 'Kalender', 'Verbindungen', 'Posteingang', 'Terminprüfung'].includes(view)) return;
+    if (!['Übersicht', 'Kalender', 'Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive'].includes(view)) return;
     status();
     if (view === 'Posteingang') ensureMail();
     if (view === 'Übersicht' || view === 'Kalender') agenda();
@@ -166,8 +167,8 @@ export function makeConnections(ctx) {
     if (!result) return;
     url.searchParams.delete('lcConnection');
     history.replaceState(null, '', url);
-    ctx.go('Verbindungen');
-    ctx.notify(result === 'connected' ? 'Konto verbunden.' : 'Die Verbindung konnte nicht abgeschlossen werden. Starte die Freigabe erneut.');
+    ctx.go(result === 'drive-connected' ? 'Google Drive' : 'Verbindungen');
+    ctx.notify(['connected','drive-connected'].includes(result) ? 'Konto verbunden.' : 'Die Verbindung konnte nicht abgeschlossen werden. Starte die Freigabe erneut.');
     status(true);
   }
   async function openMail(id) {

@@ -1,6 +1,7 @@
+import { deliverReminders, managePush } from './push-reminders.js';
 import { pollRules } from './mail-poll.js';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
-import { authorizationUrl, exchange, Failure, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
+import { authorizationUrl, driveOriginal, exchange, Failure, listDriveFiles, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
 
 const project = Deno.env.get('SUPABASE_URL');
 const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ||
@@ -80,7 +81,7 @@ async function callbackRequest(url) {
     const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier });
     const account = await profile(provider, tokens.access);
     await vault('write', user, provider, { ...account, tokens });
-    return toApp(app_url, 'connected');
+    return toApp(app_url, provider === 'drive' ? 'drive-connected' : 'connected');
   } catch {
     return toApp(app_url, 'failed');
   }
@@ -109,7 +110,10 @@ async function activeLink(user, provider) {
 async function disconnect(user, provider) {
   const link = await vault('read', user, provider);
   await vault('remove', user, provider);
-  if (provider === 'google' && link?.tokens.refresh) await revokeGoogle(link.tokens.refresh).catch(() => {});
+  if (provider !== 'microsoft' && link?.tokens.refresh) {
+    const other = await vault('status', user, provider === 'drive' ? 'google' : 'drive');
+    if (!other?.connected) await revokeGoogle(link.tokens.refresh).catch(() => {});
+  }
   return { disconnected: true };
 }
 function arg(values, key, limit, required = false) {
@@ -133,15 +137,17 @@ Deno.serve(async req => {
     try { return await callbackRequest(url); }
     catch { return new Response('Die LifeCase-Freigabe konnte nicht abgeschlossen werden.', { status: 503, headers: baseHeaders }); }
   }
-  if (url.pathname.endsWith('/poll-mail') && req.method === 'POST') {
+  const scheduledMail = url.pathname.endsWith('/poll-mail');
+  const scheduledPush = url.pathname.endsWith('/push-reminders');
+  if ((scheduledMail || scheduledPush) && req.method === 'POST') {
     const proof = req.headers.get('x-lifecase-job') || '';
     if (!/^[0-9a-f]{64}$/.test(proof)) return jsonify({ problem: 'Zugriff verweigert.' }, 401, baseHeaders);
     try {
       const permitted = unwrap(await service.rpc('lifecase_mail_job_ok', { p_token: proof }));
       if (!permitted) return jsonify({ problem: 'Zugriff verweigert.' }, 401, baseHeaders);
-      return jsonify(await pollRules(service, activeLink), 200, baseHeaders);
+      return jsonify(scheduledMail ? await pollRules(service, activeLink) : await deliverReminders(service), 200, baseHeaders);
     } catch {
-      return jsonify({ problem: 'Mailprüfung fehlgeschlagen.' }, 503, baseHeaders);
+      return jsonify({ problem: 'Geplante LifeCase-Aufgabe fehlgeschlagen.' }, 503, baseHeaders);
     }
   }
   const origin = req.headers.get('origin') || '';
@@ -159,10 +165,22 @@ Deno.serve(async req => {
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Failure(400, 'Ungültige LifeCase-Anfrage.');
     const { action, provider } = values;
     if (action === 'status') return jsonify(await status(user), 200, headers);
+    if (['push-public-key','push-subscribe','push-unsubscribe'].includes(action)) return jsonify(await managePush(service, user, action, values), 200, headers);
     if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
     if (typeof provider !== 'string' || !Object.hasOwn(providers, provider)) throw new Failure(400, 'Unbekannte Verbindung.');
     if (action === 'start') return jsonify(await begin(user, provider, origin), 200, headers);
     if (action === 'disconnect') return jsonify(await disconnect(user, provider), 200, headers);
+    if (provider === 'drive') {
+      if (!['drive-list', 'drive-file'].includes(action)) throw new Failure(400, 'Unbekannte Drive-Aktion.');
+      const link = await activeLink(user, provider);
+      const folder = arg(values, 'folder', 150);
+      if (folder && !/^[\w-]+$/.test(folder)) throw new Failure(400, 'Ungültiger Drive-Ordner.');
+      if (action === 'drive-list') return jsonify(await listDriveFiles(link.tokens.access, folder, arg(values, 'query', 160), arg(values, 'cursor', 2048)), 200, headers);
+      const id = arg(values, 'id', 150, true);
+      if (!/^[\w-]+$/.test(id)) throw new Failure(400, 'Ungültige Drive-Datei.');
+      const bytes = await driveOriginal(link.tokens.access, id);
+      return new Response(bytes, { headers: { ...headers, 'Content-Type': 'application/octet-stream' } });
+    }
     if (!['calendar', 'mail', 'detail', 'file'].includes(action)) throw new Failure(400, 'Unbekannte LifeCase-Aktion.');
     const link = await activeLink(user, provider);
     const access = link.tokens.access;

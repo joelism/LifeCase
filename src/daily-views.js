@@ -53,11 +53,11 @@ export function scanPage(rows) {
 
 const runStatus = value => ({ ok: 'Erfolgreich', partial: 'Teilweise geprüft', failed: 'Verbindung prüfen' })[value];
 export function mailReview(state, accounts) {
-  const ready = Object.values(accounts ?? {}).some(account => account.connected);
+  const ready = Object.keys(providers).some(key => accounts?.[key]?.connected);
   const rules = state.rules;
   return heading('Terminprüfung', button('Verbindungen', 'view', 'Verbindungen', 'link')) +
     (state.error ? '<div class="banner" role="alert">' + esc(state.error) + '</div>' : '') +
-    panel('E-Mails auf Termine prüfen', '<div class="panel-body settings-content"><p>Prüft neue Nachrichten im Posteingang um 08:00, 14:00 und 20:00 Uhr (Schweizer Zeit). ' +
+    panel('E-Mails auf Termine prüfen', '<div class="panel-body settings-content"><p>Prüft neue Nachrichten im Posteingang um 08:00, 12:00, 16:00 und 20:00 Uhr (Schweizer Zeit). ' +
     'LifeCase speichert die erkannten Termindaten und bei Bedarf die passende Textstelle.</p>' +
     (ready ? '<form id="daily-rules-form" class="settings-content"><label class="check"><input name="enabled" type="checkbox"' +
       (rules?.enabled ? ' checked' : '') + '> Geplante Mailprüfung aktivieren</label><label class="check"><input name="automatic" type="checkbox"' +

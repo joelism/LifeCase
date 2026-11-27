@@ -1,6 +1,6 @@
 const PREFIX = 'lifecase-shell-';
-const CACHE = 'lifecase-shell-247582cd55f06884';
-const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./site-assets/health-worker-B78SgD7n.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index-CpB11P7T.js","./site-assets/index-wpLcTmde.css","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-DsKdyCgR.js","./site-assets/model-CUZOM7Mw.js","./site-assets/ocr-CJmArlkM.js","./site-assets/pdf-BMACD8v5.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-CufvVUw0.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
+const CACHE = 'lifecase-shell-2093b482703a188b';
+const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./site-assets/health-worker-DgO6hRj7.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index-BX0qeJ1u.css","./site-assets/index-DQTlUtwx.js","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-TKiic-0d.js","./site-assets/model-p2ct29Vm.js","./site-assets/ocr-o4e5i9lt.js","./site-assets/pdf-CzA15P6J.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-WT8pvM8y.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
 const root = new URL('./', self.location.href);
 const urls = new Set(SHELL.map(path => new URL(path, root).href));
 
@@ -18,4 +18,31 @@ self.addEventListener('fetch', event => {
     return;
   }
   if (urls.has(url.href)) event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(response => response || fetch(event.request)));
+});
+
+self.addEventListener('push', event => {
+  let kind;
+  try { kind = event.data?.json()?.kind; } catch { return; }
+  if (kind !== 'expiry') return;
+  event.waitUntil(self.registration.showNotification('LifeCase · Ablauferinnerung', {
+    body: 'Ein Dokument läuft demnächst ab. Öffne LifeCase für die Einzelheiten.',
+    icon: new URL('icon-192.png', root).href,
+    tag: 'lifecase-document-expiry',
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  if (event.notification.tag !== 'lifecase-document-expiry') return;
+  event.notification.close();
+  event.waitUntil((async () => {
+    const pages = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const current = pages.find(page => new URL(page.url).pathname === root.pathname);
+    if (current) {
+      await current.focus();
+      current.postMessage({ type: 'open-reminders' });
+    } else {
+      const url = new URL(root);
+      url.searchParams.set('lcView', 'reminders');
+      await self.clients.openWindow(url.href);
+    }
+  })());
 });

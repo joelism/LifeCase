@@ -348,7 +348,7 @@ export function makeDaily(ctx, getAccounts) {
     runForm(form, async () => {
       if (form.id === 'shop-add-form') return addShopping(form, fields);
       const enabled = fields.has('enabled');
-      if (enabled && !Object.values(getAccounts() ?? {}).some(account => account.connected)) throw userError('Verbinde zuerst Outlook oder Gmail.');
+      if (enabled && !['microsoft','google'].some(key => getAccounts()?.[key]?.connected)) throw userError('Verbinde zuerst Outlook oder Gmail.');
       const epoch = ctx.epoch();
       const rules = await setDailyRules({ enabled, automatic: fields.has('automatic') });
       if (epoch !== ctx.epoch()) return;

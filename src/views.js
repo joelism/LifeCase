@@ -1,20 +1,20 @@
 import { displayedAgenda, providers } from './connected-model.js';
 import { icon } from './icons.js';
 import { button, empty, esc, jump, motif, options, tag } from './ui.js';
-import { CH_ZONE, calendarEntries, dateOf, dayDistance, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
+import { CH_ZONE, calendarEntries, dateOf, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
 
 const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: CH_ZONE });
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
 const shortMonth = new Intl.DateTimeFormat('de-CH', { month: 'short', timeZone: CH_ZONE });
 const kindStyle = {
   Termin: ['calendar',''], Schicht: ['clock','green'], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
-  Arztzeugnis: ['badge','rose'], Erinnerung: ['bell','amber'], Gespräch: ['message',''],
+  Arztzeugnis: ['badge','rose'], Rezept: ['file','rose'], Erinnerung: ['bell','amber'], Gespräch: ['message',''],
   Arztbesuch: ['heart','rose'], Wiedervorlage: ['refresh','amber'],
 };
 const statusColor = value => ({ Abgeschlossen: 'green', Erledigt: 'green', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
 
-export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.1</small></span>';
-const navGroups = [['', 'Übersicht', 'Kalender', 'Einkaufen', 'Scannen'], ['Posteingang', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Gesundheitsdaten'], ['Werkzeuge', 'Suche', 'PDF-Export', 'Verbindungen']];
+export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.2</small></span>';
+const navGroups = [['', 'Übersicht', 'Kalender', 'Einkaufen', 'Scannen'], ['Posteingang', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gesundheitsdaten'], ['Werkzeuge', 'Erinnerungen', 'Google Drive', 'Suche', 'PDF-Export', 'Verbindungen']];
 const navButton = (label, view, compact = false) => '<button class="' + (compact ? '' : 'nav-item') + '" type="button" data-view="' + esc(label) + '"' +
   (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) + esc(label) + '</button>';
 
@@ -26,7 +26,8 @@ export function shell(view, inner, state) {
     '</nav><div class="sidebar-foot">' + navButton('Einstellungen', view) + '<div class="privacy">' + icon('lock', 14) + 'Privater Bereich</div></div></aside>' +
     '<div class="workspace"><header class="top"><div class="top-date">' + icon('calendar', 17) + esc(labels.format(new Date())) +
     '</div><div class="mobile-brand">' + brand + '</div><div class="top-actions"><button class="find" type="button" data-view="Suche" aria-label="Global suchen">' +
-    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn" data-reminders="" aria-label="Erinnerungen' +
+    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger" data-assistant aria-label="Terminassistent">' +
+    icon('chat', 21) + '</button><button type="button" class="icon-btn" data-view="Erinnerungen" aria-label="Erinnerungen' +
     (activeReminderCount ? ', ' + activeReminderCount + ' fällig' : '') + '">' + icon('bell', 19) + '</button><button type="button" class="icon-btn" data-reload="" aria-label="Synchronisieren">' +
     icon('refresh', 19) + '</button></div></header><main id="main" class="main" tabindex="-1">' +
     (state.error ? '<div class="banner" role="alert">' + icon('info', 18) + esc(state.error) + '</div>' : '') + inner +
@@ -37,6 +38,8 @@ export const heading = (section, actions = '') => '<div class="heading"><div><h1
   (actions ? '<div class="actions">' + actions + '</div>' : '') + '</div>';
 export const panel = (title, body, action = '') => '<section class="panel"><div class="panel-head"><h2>' + esc(title) + '</h2>' + action + '</div>' + body + '</section>';
 
+const spacingTag = item => item?.spacing ? '<span class="spacing-tag ' + (item.spacing === 'Überschneidung' ? 'collision' : '') + '">' + esc(item.spacing) + '</span>' : '';
+
 export function recordRow(row, info = '', item = null) {
   const [symbol, color] = item ? kindStyle[item.kind] ?? ['calendar', ''] : [sections[sectionOf(row)]?.icon ?? 'file', ''];
   const status = row.archived_at ? 'Archiviert' : item ? item.kind : value(row, 'status') || value(row, 'kind');
@@ -45,7 +48,7 @@ export function recordRow(row, info = '', item = null) {
   const emblem = item ? '<span class="date-badge"><small>' + esc(shortMonth.format(new Date(item.date + 'T12:00:00Z'))) + '</small>' + esc(item.date.slice(-2)) + '</span>' :
     '<span class="tile-icon ' + color + '">' + icon(symbol, 19) + '</span>';
   return '<button type="button" class="row" data-open="' + esc(row.id) + '">' + emblem + '<span class="row-info"><span class="row-title">' +
-    esc(nameOf(row)) + '</span><span class="row-sub">' + esc(details) + '</span></span><span class="row-tail">' + tag(status, color || statusColor(status)) + icon('right', 15) + '</span></button>';
+    esc(nameOf(row)) + '</span><span class="row-sub">' + esc(details) + '</span></span><span class="row-tail">' + spacingTag(item) + tag(status, color || statusColor(status)) + icon('right', 15) + '</span></button>';
 }
 
 function externalRow(item) {
@@ -53,7 +56,7 @@ function externalRow(item) {
   return '<button type="button" class="row external-row" data-external-open="' + esc(event.provider + '|' + event.id + '|' + event.date) + '">' +
     '<span class="provider-mark ' + event.provider + '">' + providers[event.provider].mark + '</span>' + '<span class="row-info"><span class="row-title">' + esc(event.title) +
     '</span><span class="row-sub">' + esc([showDate(event.date), event.time || (event.allDay ? 'Ganztägig' : ''), event.location].filter(Boolean).join(' · ')) +
-    '</span></span><span class="row-tail">' + tag(providers[event.provider].calendar) + icon('right', 15) + '</span></button>';
+    '</span></span><span class="row-tail">' + spacingTag(item) + tag(providers[event.provider].calendar) + icon('right', 15) + '</span></button>';
 }
 
 function agendaRow(item) {
@@ -73,7 +76,7 @@ export function dashboard(rows, loading, connected, dailyActions = '') {
   const timeline = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
   const appointments = timeline.filter(item => ['Termin', 'Gespräch', 'Arztbesuch', 'Schicht'].includes(item.kind) && item.date >= day);
   const tasks = timeline.filter(item => ['Aufgabe', 'Frist'].includes(item.kind));
-  const certs = timeline.filter(item => item.kind === 'Arztzeugnis' && item.date >= day && dayDistance(day, item.date) <= 30);
+  const certs = timeline.filter(item => ['Arztzeugnis', 'Rezept'].includes(item.kind) && item.reminderDate && reminderDue(item, day));
   const reminders = timeline.filter(item => reminderDue(item, day));
   const due = timeline.filter(item => item.date >= day || ['Aufgabe','Frist','Wiedervorlage'].includes(item.kind));
   const overdue = tasks.filter(item => item.date < day);
@@ -85,14 +88,14 @@ export function dashboard(rows, loading, connected, dailyActions = '') {
     ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
     ['Nächste Termine', appointments.length, 'calendar', 'green', 'Kalender|termine'],
     ['Aufgaben und Fristen', tasks.length, 'tasks', 'amber', 'Kalender|aufgaben'],
-    ['Zeugnisse bis in 30 Tagen', certs.length, 'badge', 'rose', 'Arztzeugnisse|bald'],
+    ['Ablauf in einem Monat', certs.length, 'badge', 'rose', 'Erinnerungen|'],
   ];
   return '<section class="hero">' + motif + '<div><span class="hero-date">' + esc(labels.format(new Date())) +
     '</span><h1>Dein LifeCase</h1><div class="hero-actions">' + button('Eintrag erfassen', 'quick', '', 'plus', 'hero-cta') +
     button('Dokument scannen', 'scan-start', 'document', 'camera', 'hero-secondary') + '</div></div></section><div class="metrics">' +
     metricItems.map(([label, count, symbol, color, target]) => '<button type="button" class="metric" data-metric="' + esc(target) + '"><span class="tile-icon ' + color + '">' + icon(symbol, 19) +
       '</span><span class="metric-arrow">' + icon('arrow', 15) + '</span><strong>' + (loading ? '–' : count) + '</strong><span class="metric-label">' + esc(label) + '</span></button>').join('') +
-    '</div>' + (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(item => recordRow(item.row, '', item)).join(''), jump('Alle', 'reminders', '')) : '') +
+    '</div>' + (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(item => recordRow(item.row, '', item)).join(''), jump('Alle', 'view', 'Erinnerungen')) : '') +
     externalStatus(connected) + '<div class="dash-grid">' + todays + panel('Bevorstehend', due.some(item => item.date > day) ? due.filter(item => item.date > day).slice(0, 6).map(agendaRow).join('') :
       empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge', 'Termine, Fristen und Arztzeugnisse erscheinen hier.'), jump('Zum Kalender', 'view', 'Kalender')) +
     panel('Offene Fälle', open.length ? open.slice(0, 5).map(row => recordRow(row)).join('') :
@@ -112,22 +115,24 @@ export function sectionPage(section, rows, filter, loading) {
   const day = today();
   const local = searchRecords(rows, [], '', { section, archived: filter === 'archiv', onlyArchived: filter === 'archiv' }).filter(row => {
     if (filter === 'offen') return value(row, 'status') !== 'Abgeschlossen';
-    if (filter === 'bald') return value(row, 'validUntil') >= day && dayDistance(day, value(row, 'validUntil')) <= 30;
+    if (filter === 'bald') return calendarEntries([row]).some(item => reminderDue(item, day));
     return true;
   });
   if (section === 'Chronik' || section === 'Gespräche') local.sort((a, b) => dateOf(b).localeCompare(dateOf(a)));
-  if (section === 'Arztzeugnisse') local.sort((a, b) => String(value(b, 'validUntil')).localeCompare(String(value(a, 'validUntil'))));
+  if (['Arztzeugnisse','Rezepte'].includes(section)) local.sort((a, b) => String(value(b, 'validUntil')).localeCompare(String(value(a, 'validUntil'))));
   const choices = [['', 'Aktive Einträge'], ['archiv', 'Archiv']];
   if (section === 'Fälle') choices.splice(1, 0, ['offen', 'Offene Fälle']);
-  if (section === 'Arztzeugnisse') choices.splice(1, 0, ['bald', 'Ablauf in 30 Tagen']);
+  if (['Arztzeugnisse','Rezepte'].includes(section)) choices.splice(1, 0, ['bald', 'Ablauf in einem Monat']);
   return heading(section, button(info.create, 'create', section, 'plus', 'primary')) +
     '<div class="filters"><label class="input-wrap">Ansicht<select data-section-filter>' + options(choices, filter) + '</select></label></div>' +
     '<section class="panel" aria-label="' + esc(section) + '">' + (local.length ? local.map(row => recordRow(row,
-      section === 'Arztzeugnisse' && value(row, 'validUntil') ? 'Gültig bis ' + showDate(value(row, 'validUntil')) + ' · ' + value(row, 'incapacity') + ' % AU' : '')).join('') :
+      ['Arztzeugnisse','Rezepte'].includes(section) && value(row, 'validUntil') ?
+        (value(row, 'validUntil') < day ? 'Abgelaufen am ' : 'Gültig bis ') + showDate(value(row, 'validUntil')) +
+        (section === 'Arztzeugnisse' ? ' · ' + value(row, 'incapacity') + ' % AU' : '') : '')).join('') :
       empty(info.icon, loading ? 'Wird synchronisiert …' : filter ? 'Keine passenden Einträge' : info.empty, '', filter ? '' : button(info.create, 'create', section, 'plus'))) + '</section>';
 }
 
-const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['Schicht', 'Schichten'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
+const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['Schicht', 'Schichten'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Rezept', 'Rezepte'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
 export function calendarPage(rows, calendar, connected) {
   const day = today();
   const first = calendar.month + '-01';
@@ -160,7 +165,7 @@ export function calendarPage(rows, calendar, connected) {
     '<label class="input-wrap">Quelle<select data-calendar-source>' + options([['', 'Alle Quellen'], ['local', 'LifeCase'],
       ...Object.entries(providers).filter(([key]) => connected.accounts?.[key]?.connected).map(([key, provider]) => [key, provider.calendar])], calendar.source) + '</select></label>' +
     (calendar.selected ? button('Tagesfilter entfernen', 'day', '', 'close') : '') +
-    (Object.values(connected.accounts ?? {}).some(account => account.connected) ? button('Kalender aktualisieren', 'external-reload', '', 'refresh') : '') +
+    (Object.keys(providers).some(key => connected.accounts?.[key]?.connected) ? button('Kalender aktualisieren', 'external-reload', '', 'refresh') : '') +
     '</div>' + externalStatus(connected) + '<div class="calendar-layout">' + month +
     panel(calendar.selected ? showDate(calendar.selected) : 'Agenda', items.length ? items.map(agendaRow).join('') :
       empty('calendar','Keine Einträge in dieser Ansicht'), items.some(item => !item.external) ? jump('LifeCase-Termine exportieren', 'ics', 'agenda', 'download') : '') + '</div>';
@@ -195,7 +200,7 @@ export const exportKinds = {
   all: ['Ausgewählte Einträge', recordSections],
   case: ['Falldossier', recordSections],
   talks: ['Gesprächsprotokoll', ['Gespräche']],
-  health: ['Gesundheitsübersicht', ['Gesundheit','Arztzeugnisse']],
+  health: ['Gesundheitsübersicht', ['Gesundheit','Arztzeugnisse','Rezepte']],
   history: ['Chronik', ['Chronik']],
 };
 export function exportCandidates(rows, filters) {

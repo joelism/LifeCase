@@ -26,7 +26,11 @@ export function connectionsView(state) {
     (state.error ? '<div class="banner" role="alert">' + esc(state.error) + '</div>' : '') +
     '<div class="integration-grid">' + cards + '<article class="panel integration-card"><div class="provider-heading"><span class="provider-mark apple">' +
     icon('heart', 22) + '</span><div><h2>Apple Health</h2><p>Gesundheitsdaten vom iPhone</p></div></div><p>Importiere ausgewählte Tageswerte aus einem Apple-Health-Export.</p>' +
-    button('Gesundheitsdaten öffnen', 'view', 'Gesundheitsdaten', 'arrow') + '</article></div>';
+    button('Gesundheitsdaten öffnen', 'view', 'Gesundheitsdaten', 'arrow') +
+    '</article><article class="panel integration-card"><div class="provider-heading"><span class="provider-mark google">G</span>' +
+    '<div><h2>Google Drive</h2><p>Scans und Originaldateien</p></div></div>' +
+    (state.accounts?.drive?.connected ? tag('Verbunden', 'green') : '') +
+    button('Google Drive öffnen', 'view', 'Google Drive', 'arrow') + '</article></div>';
 }
 
 export function mailboxView(state) {

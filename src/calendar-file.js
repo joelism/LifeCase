@@ -44,10 +44,12 @@ export function calendarFile(items, now = new Date()) {
     if (item.privateDetail && item.location) lines.push('LOCATION:' + escape(item.location));
     if (item.privateDetail && item.description) lines.push('DESCRIPTION:' + escape(item.description));
     lines.push('CLASS:PRIVATE');
-    if (reminderDays !== '' && reminderDays != null && /^\d+$/.test(reminderDays)) {
+    const alarms = [...new Set([reminderDays, item.extraReminderDays].filter(value => value !== '' && value != null && /^\d+$/.test(value)))];
+    for (const days of alarms) {
       lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:LifeCase-Erinnerung',
-        Number(reminderDays) ? 'TRIGGER:-P' + reminderDays + 'D' : 'TRIGGER:PT0S', 'END:VALARM');
-    } else if (item.kind === 'Erinnerung') {
+        Number(days) ? 'TRIGGER:-P' + days + 'D' : 'TRIGGER:PT0S', 'END:VALARM');
+    }
+    if (!alarms.length && item.kind === 'Erinnerung') {
       lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:LifeCase-Erinnerung', 'TRIGGER:PT0S', 'END:VALARM');
     }
     lines.push('END:VEVENT');

@@ -299,3 +299,17 @@ dialog[open]{animation:enter .2s ease-out}
 .bottom-nav{gap:1px}
 .bottom-nav button{flex:1}
 @media(max-width:620px){.scan-grid{grid-template-columns:1fr}.shopping-add{grid-template-columns:2fr 1fr}.shopping-add .button{grid-column:1/-1}.shopping-lines{padding-inline:12px}}
+
+.assistant-trigger{color:var(--accent);background:var(--blue-bg);border:1px solid var(--line)}
+.spacing-tag{display:inline-flex;align-items:center;white-space:nowrap;border-radius:12px;padding:4px 7px;background:var(--amber-bg);color:var(--amber);font-size:10px;font-weight:760}
+.spacing-tag.collision{background:var(--rose-bg);color:var(--rose)}
+dialog:has(.assistant-thread){margin:auto 22px 22px auto;width:min(426px,calc(100% - 24px))}
+.assistant-thread{display:grid;gap:10px;max-height:min(42dvh,380px);overflow:auto;padding:2px 1px 4px}
+.assistant-bubble{display:grid;justify-items:start;gap:8px;width:fit-content;max-width:89%;padding:9px 11px;border-radius:12px;background:var(--soft);overflow-wrap:anywhere}
+.assistant-bubble.user{justify-self:end;background:var(--blue-bg);color:var(--text)}
+.assistant-bubble p{font-size:14px}
+.assistant-bubble .button{font-size:12px;min-height:32px}
+.assistant-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:end;padding-top:4px}
+.assistant-form>.button{width:43px;padding:6px}
+.drive-row .row-title{overflow-wrap:anywhere}
+@media(max-width:620px){dialog:has(.assistant-thread){margin:auto auto max(10px,env(safe-area-inset-bottom));width:calc(100% - 18px)}.assistant-thread{max-height:31dvh}.top-actions{gap:4px}.top-actions .icon-btn{width:36px}}
