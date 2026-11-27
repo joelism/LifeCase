@@ -5,12 +5,13 @@ const clock = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-dig
 const timePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const scheduledKinds = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht']);
 const planKey = 'lifecase_sleep_plan';
+const morningKey = 'lifecase_sleep_morning';
 const validTime = value => typeof value === 'string' && timePattern.test(value);
-export const sleepDefaults = Object.freeze({ enabled: true, wake: '07:00', goal: 480, lead: 60,
+export const sleepDefaults = Object.freeze({ enabled: true, wake: '', goal: 480, lead: 60,
   earliestBed: '23:00', latestBed: '02:00' });
 
 export function validSleepPlan(plan) {
-  return typeof plan?.enabled === 'boolean' && validTime(plan.wake) &&
+  return typeof plan?.enabled === 'boolean' && (plan.wake === '' || validTime(plan.wake)) &&
     validTime(plan.earliestBed) && validTime(plan.latestBed) &&
     Number.isInteger(plan.goal) && plan.goal >= 360 && plan.goal <= 720 && plan.goal % 15 === 0 &&
     Number.isInteger(plan.lead) && plan.lead >= 0 && plan.lead <= 240;
@@ -22,6 +23,30 @@ export function sleepPreferences(user) {
 }
 
 export const sleepProfileUpdate = plan => ({ [planKey]: plan });
+
+export function sleepMorningDate(now = new Date()) {
+  const day = today(now);
+  return clock.format(now) < '04:00' ? day : shiftDate(day, 1);
+}
+
+export function sleepMorning(user, now = new Date()) {
+  const answer = user?.user_metadata?.[morningKey];
+  return answer?.date === sleepMorningDate(now) && (answer.wake === '' || validTime(answer.wake)) ? answer : null;
+}
+
+export const sleepMorningUpdate = answer => ({ [morningKey]: answer });
+
+export function readSleepReply(text) {
+  const reply = text.toLocaleLowerCase('de-CH').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').replace(/^doch /, '');
+  const free = /^(?:(?:ich )?(?:hab(?:e)? )?(?:(?:morgen|heute) )?frei|(?:morgen|heute) hab(?:e)? ich frei|keine feste (?:aufsteh)?zeit|ohne wecker)$/;
+  const sleepIn = /^(?:ausschlafen|(?:ich )?schlafe?(?: (?:morgen|heute))? aus|(?:morgen|heute) schlafe? ich aus)$/;
+  if (free.test(reply) || sleepIn.test(reply)) {
+    return { wake: '' };
+  }
+  const time = reply.match(/^(?:(?:ich )?(?:stehe|möchte|muss|will)(?: (?:morgen|heute))? )?(?:(?:morgen|heute) )?(?:um )?([01]?\d|2[0-3])(?:[:.]([0-5]\d))?(?: uhr)?(?: (?:auf|aufstehen))?$/);
+  if (time) return { wake: time[1].padStart(2, '0') + ':' + (time[2] || '00') };
+  return null;
+}
 
 export function isSleepPlanningTime(now = new Date()) {
   const hour = Number(clock.format(now).slice(0, 2));
@@ -44,17 +69,19 @@ export function sleepHistory(rows, now = new Date()) {
   return nights.length ? { count: nights.length, average: Math.round(nights.reduce((sum, value) => sum + value, 0) / nights.length * 60) } : null;
 }
 
-export function planSleep(entries, settings, now = new Date()) {
-  const day = today(now);
-  const eveningDay = clock.format(now) < '04:00' ? shiftDate(day, -1) : day;
-  const morning = shiftDate(eveningDay, 1);
-  const normalWake = localTime(morning, settings.wake);
+export function planSleep(entries, settings, now = new Date(), answer = null) {
+  const morning = sleepMorningDate(now);
+  const eveningDay = shiftDate(morning, -1);
   const timed = entries.filter(item => item.state === 'Offen' && scheduledKinds.has(item.kind) &&
-    item.external?.busy !== false && timePattern.test(item.time) && item.date >= eveningDay && item.date <= morning)
+    item.external?.busy !== false && validTime(item.time) && item.date >= eveningDay && item.date <= morning)
     .map(item => ({ ...item, startsAt: localTime(item.date, item.time) })).sort((a, b) => a.startsAt - b.startsAt);
   const first = timed.find(item => item.date === morning && item.startsAt > now.getTime());
-  const earlyWake = first ? first.startsAt - settings.lead * 60000 : Infinity;
-  const wake = Math.min(normalWake, earlyWake);
+  const latestWake = first ? first.startsAt - settings.lead * 60000 : null;
+  const suggestedWake = first?.time < '12:00' && latestWake > now.getTime() && today(new Date(latestWake)) === morning ? clock.format(latestWake) : '';
+  if (answer?.date !== morning || !validTime(answer.wake)) {
+    return { status: answer?.date === morning && answer.wake === '' ? 'flexible' : 'question', morning, first, suggestedWake };
+  }
+  const wake = localTime(morning, answer.wake);
   const windowDay = settings.earliestBed < '12:00' ? morning : eveningDay;
   const lastDay = settings.latestBed < settings.earliestBed ? shiftDate(windowDay, 1) : windowDay;
   const earliest = localTime(windowDay, settings.earliestBed);
@@ -64,9 +91,9 @@ export function planSleep(entries, settings, now = new Date()) {
   const conflict = plannedMinutes > 0 ? timed.find(item => item.startsAt < wake &&
     (item.startsAt >= bed || (timePattern.test(item.endTime) && localTime(item.endDate || item.date, item.endTime) > bed))) : null;
   return {
-    wakeTime: clock.format(wake), wakeDay: today(new Date(wake)),
+    status: 'scheduled', wakeTime: clock.format(wake),
     bedTime: clock.format(bed), bedDay: today(new Date(bed)),
-    first: earlyWake < normalWake ? first : null, conflict, plannedMinutes,
+    first, suggestedWake, shortBuffer: first && wake > latestWake, conflict, plannedMinutes,
     minutesLeft: plannedMinutes > 0 && wake > now.getTime() && bed < now.getTime() ?
       Math.floor((wake - now.getTime()) / 60000) : null,
     alreadyArose: wake <= now.getTime(), morning,

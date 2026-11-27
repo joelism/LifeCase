@@ -10,6 +10,8 @@ import { icon } from './icons.js';
 import { findLunchSlot, lunchRequest, lunchSlotIsFree } from './lunch.js';
 import { lunchLabel, shiftWorkdays } from './workday.js';
 import { dateOf, nameOf, sectionOf, shiftDate, showDate, sha256, today, value } from './model.js';
+import { readSleepReply } from './sleep-plan.js';
+import { sleepCalendarNote, sleepQuestion } from './sleep-views.js';
 import { button, esc, options } from './ui.js';
 
 const prompts = {
@@ -39,8 +41,38 @@ export function makeAssistant(ctx, currentAccounts) {
   let pendingCase = null;
   let lastChronicleId = '';
   let pendingAppointment = null;
+  let sleepEditingDay = '';
   const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; }
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; sleepEditingDay = ''; }
+
+  function openSleepQuestion() {
+    const sleep = ctx.sleepCheckIn();
+    if (!sleep || (sleep.plan.status !== 'question' && sleep.plan.morning !== sleepEditingDay)) return null;
+    return sleep;
+  }
+  function sleepMessage({ plan }) {
+    return [sleepQuestion(plan, ctx.name()), sleepCalendarNote(plan)].filter(Boolean).join(' ');
+  }
+  function sleepBubble(sleep) {
+    if (!sleep) return '';
+    const suggested = sleep.calendarIncomplete ? '' : sleep.plan.suggestedWake;
+    const usual = sleep.settings.wake;
+    const choices = [button('Ausschlafen', 'sleep-reply', '', 'moon')];
+    if (suggested) choices.push(button(suggested + ' Uhr · Kalendervorschlag', 'sleep-reply', suggested, 'clock'));
+    if (usual && usual !== suggested) choices.push(button(usual + ' Uhr · Schnellantwort', 'sleep-reply', usual, 'clock'));
+    return '<div class="assistant-bubble assistant"><p>' + esc(sleepMessage(sleep)) + '</p><div class="actions">' +
+      choices.join('') + '</div></div>';
+  }
+  async function recordSleepReply(sleep, wake, text, epoch) {
+    const date = sleep.plan.morning;
+    await ctx.saveSleepMorning({ date, wake }, epoch);
+    if (epoch !== ctx.epoch()) return;
+    sleepEditingDay = '';
+    add('assistant', sleepMessage(sleep));
+    add('user', text);
+    add('assistant', wake ? 'Für den ' + showDate(date) + ' ist ' + wake + ' Uhr als Aufstehzeit gespeichert.' :
+      'Für den ' + showDate(date) + ' lasse ich deine Aufstehzeit offen.');
+  }
 
   async function agendaFor(date, strict = false) {
     const latest = currentAccounts() ?? (await connection('status').catch(() => ({}))).accounts;
@@ -320,7 +352,7 @@ export function makeAssistant(ctx, currentAccounts) {
     add('assistant', showDate(date) + (entries.length ? '\n' + lines.join('\n') :
       ' · Keine Einträge gefunden.' + (lines.length ? '\n' + lines.join('\n') : '')));
   }
-  function content() {
+  function content(sleep) {
     const messages = history.length ? history.map(row => '<div class="assistant-bubble ' + row.side + '"><p>' + esc(row.text) + '</p>' +
       (row.record ? button(row.label,'open',row.record,row.label === 'Dossier öffnen' ? 'folder' : 'calendar') : '') + '</div>').join('') :
       '<div class="assistant-bubble assistant"><p>' + (aiAvailable ?
@@ -344,11 +376,13 @@ export function makeAssistant(ctx, currentAccounts) {
       '<div class="assistant-tools"><div class="actions">' +
       button('Termin prüfen', 'care-review', '', 'calendar', 'primary') + button('Entwurf verwerfen', 'care-discard') +
       '</div></div>' : '';
-    return '<p class="hint assistant-running">' + status + '</p>' + messages + caseControls + appointmentControls +
-      (!busy ? controls : '<p class="hint assistant-running" role="status">Einen Moment …</p>');
+    return '<p class="hint assistant-running">' + status + '</p>' + (history.length || !sleep ? messages : '') + caseControls + appointmentControls +
+      (!busy ? controls + sleepBubble(sleep) : '<p class="hint assistant-running" role="status">Einen Moment …</p>');
   }
-  function open(autoLunch = false) {
-    const dialog = openDialog('LifeCase-Assistent', '<div class="assistant-thread" aria-live="polite">' + content() + '</div>' +
+  function open(autoLunch = false, sleepDay = '') {
+    sleepEditingDay = sleepDay;
+    let shownSleep = openSleepQuestion();
+    const dialog = openDialog('LifeCase-Assistent', '<div class="assistant-thread" aria-live="polite">' + content(shownSleep) + '</div>' +
       '<form class="assistant-form"><button type="button" class="icon-btn" data-assistant-lunch-tool aria-label="Mittagspause finden">' + icon('sun', 20) + '</button>' +
       '<textarea name="request" aria-label="Deine Nachricht" maxlength="500" rows="2" placeholder="Was soll ich festhalten oder planen?" ' +
       'enterkeyhint="send" autocomplete="off" required>' + esc(pendingMessage) + '</textarea>' +
@@ -359,13 +393,18 @@ export function makeAssistant(ctx, currentAccounts) {
     const field = form.elements.request;
     const submit = form.querySelector('[type=submit]');
     const scrollToEnd = () => { thread.scrollTop = thread.scrollHeight; };
-    const draw = () => { thread.innerHTML = content(); scrollToEnd(); submit.disabled = busy || aiAvailable === null; };
+    const draw = () => {
+      shownSleep = openSleepQuestion();
+      thread.innerHTML = content(shownSleep);
+      scrollToEnd();
+      submit.disabled = busy || (aiAvailable === null && !shownSleep);
+    };
     trackViewport(dialog, form, scrollToEnd);
     field.addEventListener('input', () => { pendingMessage = field.value; });
     field.addEventListener('keydown', event => {
       if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
       event.preventDefault();
-      if (!busy && aiAvailable !== null && field.value.trim()) form.requestSubmit();
+      if (!submit.disabled && field.value.trim()) form.requestSubmit();
     });
     async function run(action, retryText = '') {
       if (busy) return;
@@ -407,6 +446,12 @@ export function makeAssistant(ctx, currentAccounts) {
     });
     thread.addEventListener('click', event => {
       const control = event.target.closest('button');
+      if (control?.hasAttribute('data-sleep-reply') && shownSleep) {
+        const wake = control.dataset.sleepReply;
+        const question = shownSleep;
+        run(epoch => recordSleepReply(question, wake, wake ? wake + ' Uhr' : 'Ausschlafen', epoch));
+        return;
+      }
       if (control?.hasAttribute('data-assistant-case')) {
         const id = control.dataset.assistantCase;
         if (id === 'cancel') { pendingCase = null; add('assistant', 'Auswahl abgebrochen.'); draw(); }
@@ -428,11 +473,15 @@ export function makeAssistant(ctx, currentAccounts) {
     form.querySelector('[data-assistant-lunch-tool]').addEventListener('click', () => run(find));
     form.addEventListener('submit', event => {
       event.preventDefault();
-      if (busy || aiAvailable === null) return;
+      if (busy) return;
       const text = field.value.trim();
       if (!text) return;
+      const question = shownSleep;
+      const answer = question && readSleepReply(text);
+      if (!answer && aiAvailable === null) return;
       field.value = '';
       pendingMessage = '';
+      if (answer) return run(epoch => recordSleepReply(question, answer.wake, text, epoch), text);
       add('user', text);
       if (proposal && isYes(text)) return run(blockLunch);
       if (proposal && isNo(text)) return cancel();

@@ -1,5 +1,5 @@
-import { isSleepPlanningTime, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
-import { sleepSettingsFields } from './sleep-views.js';
+import { isSleepPlanningTime, planSleep, sleepMorning, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
+import { renderSleepPlan, sleepSettingsFields } from './sleep-views.js';
 import { appointmentCheckIns } from './appointment-care.js';
 import { openAppointmentCheckIn } from './appointment-dialogs.js';
 import { briefingSnapshot, makeDailyBriefing } from './daily-briefing.js';
@@ -11,6 +11,7 @@ import { disablePush, enablePush, pushEnabled, pushSupported } from './push.js';
 import { makeDaily } from './daily.js';
 import { mailReview, scanPage, shoppingPage } from './daily-views.js';
 import { makeConnections } from './connections.js';
+import { displayedAgenda, providers } from './connected-model.js';
 import { connectionsView, healthView, mailboxView } from './connected-views.js';
 import { db, downloadBlob, files, get, message, records, userError } from './backend.js';
 import { calendarFile } from './calendar-file.js';
@@ -40,6 +41,7 @@ const ctx = {
   weekStart: () => planner.state.start, externalEvents: () => connected.state.events,
   accountsLoaded: () => drive.activate(), refreshCalendar: () => connected.agenda(true), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
   rows: () => state.rows, files: () => state.files, name: () => profileName(state.session?.user), epoch: () => state.epoch,
+  sleepCheckIn, saveSleepMorning,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
   notify, sync,
@@ -168,14 +170,42 @@ function settings() {
       '<p>LifeCase ist auf diesem Gerät als Web-App geöffnet.</p>' :
       '<div class="actions">' + button('LifeCase installieren', 'install', '', 'download', 'primary') + '</div>') + '</div>');
 }
-function mainView() {
+function sleepCheckIn(now = new Date()) {
+  if (!state.verified || !isSleepPlanningTime(now)) return null;
+  const settings = sleepPreferences(state.session?.user);
+  if (!settings.enabled) return null;
+  const { accounts, calendarLoading, calendarErrors, events, eventsKey, eventsLoaded } = connected.state;
+  const [from, through] = eventsKey.split('|');
+  const morning = sleepMorningDate(now);
+  const hasExternalCalendar = Object.keys(providers).some(key => accounts?.[key]?.connected);
+  const calendarIncomplete = !lastSync || Boolean(state.error) || !accounts ||
+    (hasExternalCalendar && (!eventsLoaded || calendarLoading || calendarErrors.length > 0 || from > morning || through < morning));
+  const plan = planSleep(displayedAgenda(state.rows, events), settings, now, sleepMorning(state.session?.user, now));
+  return { plan, settings, now, calendarIncomplete };
+}
+async function saveSleepMorning(answer, epoch) {
+  if (!state.verified || epoch !== state.epoch) return;
+  const now = new Date();
+  if (!isSleepPlanningTime(now) || answer.date !== sleepMorningDate(now)) {
+    throw userError('Die Frage gehört zu einer anderen Nacht. Öffne den Schlafplan erneut.');
+  }
+  if (planSleep([], sleepPreferences(state.session?.user), now, answer).alreadyArose) {
+    throw userError('Diese Uhrzeit ist schon vorbei. Wähle eine spätere Zeit oder «Ausschlafen».');
+  }
+  const result = get(await db.auth.updateUser({ data: sleepMorningUpdate(answer) }));
+  if (epoch !== state.epoch) return;
+  state.session = { ...state.session, user: result.user };
+  render();
+}
+function mainView(sleep) {
   if (state.view === 'Übersicht') {
     const suggestions = daily.state.suggestions.length;
     const ready = !state.loading && !connected.state.calendarLoading && lastSync > 0;
     const snapshot = ready ? briefingSnapshot(state.rows, connected.state.events, suggestions) : null;
     if (snapshot) queueMicrotask(() => { if (state.verified && state.view === 'Übersicht') briefing.refresh(snapshot); });
     return dashboard(state.rows, state.loading, connected.state, {
-      name: profileName(state.session?.user), suggestions, briefing: snapshot ? briefing.view(snapshot) : '', sleepSettings: sleepPreferences(state.session?.user),
+      name: profileName(state.session?.user), suggestions, briefing: snapshot ? briefing.view(snapshot) : '',
+      sleep: sleep ? renderSleepPlan(sleep, connected.state.recentSleep) : '',
     });
   }
   if (state.view === 'Meine Woche') return planner.view(state.rows, connected.state);
@@ -196,7 +226,8 @@ function mainView() {
   return sectionPage(state.view, state.rows, state.sectionFilter, state.loading);
 }
 function render() {
-  app.innerHTML = state.verified ? shell(state.view, mainView(), state) : authPage();
+  const sleep = sleepCheckIn();
+  app.innerHTML = state.verified ? shell(state.view, mainView(sleep), state, sleep?.plan.status === 'question') : authPage();
   if (!state.verified) bindAuth();
 }
 function go(view, filter = '', focus = true) {
@@ -505,6 +536,7 @@ document.addEventListener('click', async event => {
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
   else if ('sleepSettings' in action) openSleepSettings();
+  else if ('assistantSleep' in action) assistant.open(false, action.assistantSleep);
   else if ('careCheckIn' in action) openAppointmentCheckIn(action.careCheckIn, ctx);
   else if ('assistant' in action || 'assistantLunch' in action) assistant.open('assistantLunch' in action);
   else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);

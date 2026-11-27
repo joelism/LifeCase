@@ -1,4 +1,3 @@
-import { renderSleepPlan } from './sleep-views.js';
 import { appointmentCheckIns, checkInQuestion } from './appointment-care.js';
 import { calendarRecordTitle } from './calendar-assistant.js';
 import { displayedAgenda, providers } from './connected-model.js';
@@ -28,7 +27,7 @@ const navButton = (label, view, compact = false) => '<button class="' + (compact
   (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) +
   esc(compact ? ({ Übersicht: 'Heute', 'Meine Woche': 'Woche' })[label] ?? label : label) + '</button>';
 
-export function shell(view, inner, state) {
+export function shell(view, inner, state, sleepQuestion = false) {
   const reminders = calendarEntries(state.rows).filter(item => reminderDue(item, today())).length +
     appointmentCheckIns(state.rows).length;
   const name = profileName(state.session?.user);
@@ -41,8 +40,10 @@ export function shell(view, inner, state) {
     '</strong><small>Einstellungen</small></span>' + icon('settings', 16) + '</button></div></aside>' +
     '<div class="workspace"><header class="top"><div class="top-location">' + icon(sections[view].icon, 16) + esc(view) +
     '</div><div class="mobile-brand">' + brand + '</div><div class="top-actions"><button class="find" type="button" data-view="Suche" aria-label="Global suchen">' +
-    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger" data-assistant aria-label="LifeCase-Assistent">' +
-    icon('chat', 21) + '</button><button type="button" class="icon-btn notification-button" data-view="Erinnerungen" aria-label="Erinnerungen' +
+    icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger notification-button" data-assistant aria-label="LifeCase-Assistent' +
+    (sleepQuestion ? ', eine offene Rückfrage' : '') + '">' + icon('chat', 21) +
+    (sleepQuestion ? '<span class="notice-count" aria-hidden="true">1</span>' : '') +
+    '</button><button type="button" class="icon-btn notification-button" data-view="Erinnerungen" aria-label="Erinnerungen' +
     (reminders ? ', ' + reminders + ' fällig' : '') + '">' + icon('bell', 19) +
     (reminders ? '<span class="notice-count" aria-hidden="true">' + (reminders > 9 ? '9+' : reminders) + '</span>' : '') +
     '</button><button type="button" class="icon-btn top-sync" data-reload aria-label="Synchronisieren">' + icon('refresh', 19) +
@@ -119,15 +120,12 @@ export function checkInPanel(rows, limit = rows.length) {
   rows.length > limit ? jump('Alle Rückfragen', 'view', 'Erinnerungen') : '');
 }
 
-export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '', sleepSettings = null } = {}) {
+export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '', sleep = '' } = {}) {
   const day = today();
   const active = rows.filter(isActive);
   const openCases = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen').length;
   const agenda = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
   const timeline = groupWorkdays(agenda);
-  const sleep = !loading && sleepSettings ? renderSleepPlan(agenda, connected.recentSleep, sleepSettings, {
-    overview: true, calendarIncomplete: !connected.accounts || connected.calendarLoading || Boolean(connected.calendarErrors?.length),
-  }) : '';
   const datedTasks = timeline.filter(item => planningKinds.includes(item.kind));
   const undated = active.filter(row => isOpenTask(row) && !value(row, 'date')).length;
   const reminders = timeline.filter(item => reminderDue(item, day)).length;
