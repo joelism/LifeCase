@@ -44,16 +44,28 @@ const getGraph = (url, access, headers) => getJson(url, access, { Prefer: 'IdTyp
 const identity = value => encodeURIComponent(value);
 const decode = value => Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), letter => letter.charCodeAt(0));
 
-export function authorizationUrl(provider, cfg, callback, state, challenge) {
+function scopeFor(provider, write) {
+  const scope = providers[provider].scope;
+  if (!write) return scope;
+  if (provider === 'google') return scope + ' https://www.googleapis.com/auth/calendar.events.owned';
+  return provider === 'microsoft' ? scope.replace('/Calendars.Read', '/Calendars.ReadWrite') : scope;
+}
+function hasWriteScope(provider, scope) {
+  const scopes = String(scope || '').toLowerCase().split(/\s+/);
+  return provider === 'google' ? scopes.includes('https://www.googleapis.com/auth/calendar.events.owned') ||
+    scopes.includes('https://www.googleapis.com/auth/calendar.events') || scopes.includes('https://www.googleapis.com/auth/calendar') :
+    provider === 'microsoft' && scopes.some(item => item.split('/').at(-1) === 'calendars.readwrite');
+}
+export function authorizationUrl(provider, cfg, callback, state, challenge, write = false) {
   return withQuery(providers[provider].authorize, {
-    client_id: cfg.client_id, redirect_uri: callback, response_type: 'code', scope: providers[provider].scope,
+    client_id: cfg.client_id, redirect_uri: callback, response_type: 'code', scope: scopeFor(provider, write),
     code_challenge: challenge, code_challenge_method: 'S256', state,
     ...(provider !== 'microsoft' ? { access_type: 'offline', prompt: 'consent select_account' } : { prompt: 'select_account' }),
   });
 }
-export async function exchange(provider, cfg, params, oldRefresh = '') {
+export async function exchange(provider, cfg, params, oldRefresh = '', write = false) {
   const requestFields = { client_id: cfg.client_id, client_secret: cfg.client_secret, ...params };
-  if (provider === 'microsoft') requestFields.scope = providers[provider].scope;
+  if (provider === 'microsoft') requestFields.scope = scopeFor(provider, write);
   const response = await request(providers[provider].token, {
     method: 'POST', body: new URLSearchParams(requestFields), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   });
@@ -64,7 +76,8 @@ export async function exchange(provider, cfg, params, oldRefresh = '') {
   const data = await response.json();
   const refresh = data.refresh_token || oldRefresh;
   if (!data.access_token || !refresh) throw new Failure(403, 'Die Freigabe enthält keinen dauerhaften Kontozugriff.');
-  return { access: data.access_token, refresh, expires: Date.now() + Number(data.expires_in || 3600) * 1000 };
+  return { access: data.access_token, refresh, expires: Date.now() + Number(data.expires_in || 3600) * 1000,
+    calendarWrite: write && (data.scope ? hasWriteScope(provider, data.scope) : params.grant_type === 'refresh_token') };
 }
 export async function profile(provider, access) {
   if (provider === 'drive') {
@@ -232,7 +245,10 @@ function calendarEvent(provider, entry, calendarId) {
   const endDate = exclusive ? daysAfter(exclusive, -1) : (endStamp ? localDayAndTime(new Date(Date.parse(endStamp) - 1))?.date : start.date);
   return { provider, id: calendarId + ':' + entry.id, title: (google ? entry.summary : entry.subject) || '(Ohne Titel)',
     date: start.date, time: start.time, endTime: allDay ? '' : localDayAndTime(endStamp)?.time || '',
-    timeEndDate: allDay ? '' : localDayAndTime(endStamp)?.date || '', endDate: endDate && endDate >= start.date ? endDate : start.date, allDay,
+    timeEndDate: allDay ? '' : localDayAndTime(endStamp)?.date || '',
+    busy: google ? entry.transparency !== 'transparent' : entry.showAs !== 'free',
+    lifeCasePause: (google ? entry.summary : entry.subject) === 'Mittagspause',
+    endDate: endDate && endDate >= start.date ? endDate : start.date, allDay,
     location: (google ? entry.location : entry.location?.displayName) || '' };
 }
 async function pages(first, provider, access, itemsKey, maximum = 8) {
@@ -264,9 +280,9 @@ export async function listCalendar(provider, access, from, through) {
   for (let offset = 0; offset < enabled.length; offset += 5) {
     const results = await Promise.all(enabled.slice(offset, offset + 5).map(async ({ id }) => {
       const url = google ? withQuery(googleCalendars + identity(id) + '/events',
-        { timeMin: lower, timeMax: upper, singleEvents: true, showDeleted: false, maxResults: 100, fields: 'nextPageToken,items(id,status,summary,location,start,end)' }) :
+        { timeMin: lower, timeMax: upper, singleEvents: true, showDeleted: false, maxResults: 100, fields: 'nextPageToken,items(id,status,summary,location,start,end,transparency)' }) :
         withQuery(graph + 'me/calendars/' + identity(id) + '/calendarView', { startDateTime: lower, endDateTime: upper,
-          $select: 'id,subject,start,end,location,isAllDay,isCancelled', $top: 100 });
+          $select: 'id,subject,start,end,location,isAllDay,isCancelled,showAs', $top: 100 });
       const events = await pages(url, provider, access, google ? 'items' : 'value');
       return events.map(event => calendarEvent(provider, event, id)).filter(event => event && event.date <= through && event.endDate >= from);
     }));
@@ -319,4 +335,26 @@ export async function driveOriginal(access, id) {
   if (info.capabilities?.canDownload === false) throw new Failure(403, 'Google Drive erlaubt das Herunterladen dieser Datei nicht.');
   if (Number(info.size) > 20 * 1024 * 1024) throw new Failure(413, 'Diese Originaldatei ist grösser als 20 MB.');
   return readBinary(await providerRequest(withQuery(url, { alt: 'media' }), access), 20 * 1024 * 1024, '20 MB');
+}
+
+export async function createLunchBlock(provider, access, day, time, endTime, key) {
+  const google = provider === 'google';
+  const timezone = google ? 'Europe/Zurich' : 'W. Europe Standard Time';
+  const timestamp = clock => ({ dateTime: day + 'T' + clock + ':00', timeZone: timezone });
+  const title = 'Mittagspause';
+  const target = google ? withQuery(googleCalendars + 'primary/events', { sendUpdates: 'none' }) : graph + 'me/calendar/events';
+  const fields = { start: timestamp(time), end: timestamp(endTime) };
+  const transactionId = [key.slice(0,8),key.slice(8,12),'4'+key.slice(13,16),'a'+key.slice(17,20),key.slice(20,32)].join('-');
+  const data = google ? { ...fields, id: key, summary: title, transparency: 'opaque', visibility: 'private', reminders: { useDefault: false } } :
+    { ...fields, subject: title, showAs: 'busy', sensitivity: 'private', isReminderOn: false, transactionId };
+  const response = await request(target, { method: 'POST', headers: { Authorization: 'Bearer ' + access, 'Content-Type': 'application/json' },
+    body: JSON.stringify(data) });
+  if (response.ok) { await response.body?.cancel(); return { saved: true }; }
+  await response.body?.cancel();
+  if (google && response.status === 409) {
+    const existing = await getJson(googleCalendars + 'primary/events/' + identity(key), access);
+    if (existing.summary === title && existing.status !== 'cancelled') return { saved: true };
+  }
+  if (response.status === 401 || response.status === 403) throw new Failure(403, 'Die Kalender-Schreibfreigabe fehlt oder ist abgelaufen.');
+  throw new Failure(502, 'Der Kalenderanbieter hat die Mittagspause nicht bestätigt.');
 }

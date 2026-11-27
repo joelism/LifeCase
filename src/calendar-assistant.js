@@ -80,7 +80,7 @@ export function interpretAppointment(input, draft = null, reference = new Date()
   return { status: 'ready', draft: next };
 }
 
-const timedKinds = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht']);
+const timedKinds = new Set(['Termin', 'Gespräch', 'Arztbesuch', 'Schicht', 'Pause']);
 const minuteOf = time => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));
 const startAt = (date, time) => Date.parse(date + 'T00:00:00Z') / 60000 + minuteOf(time);
 const validClock = time => typeof time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(time);

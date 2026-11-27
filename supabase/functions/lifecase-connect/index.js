@@ -1,7 +1,7 @@
 import { deliverReminders, managePush } from './push-reminders.js';
 import { pollRules } from './mail-poll.js';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
-import { authorizationUrl, driveOriginal, exchange, Failure, listDriveFiles, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
+import { authorizationUrl, createLunchBlock, driveOriginal, exchange, Failure, listDriveFiles, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
 
 const project = Deno.env.get('SUPABASE_URL');
 const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ||
@@ -51,20 +51,21 @@ async function authenticate(req) {
 async function status(user) {
   const entries = await Promise.all(Object.keys(providers).map(async provider => {
     const [config, link] = await Promise.all([vault('config', user, provider), vault('status', user, provider)]);
-    return [provider, { available: isConfigured(config), ...link }];
+    const stored = provider !== 'drive' && link?.connected ? await vault('read', user, provider) : null;
+    return [provider, { available: isConfigured(config), ...link, calendarWrite: stored?.tokens?.calendarWrite === true }];
   }));
   return { accounts: Object.fromEntries(entries), callback };
 }
-async function begin(user, provider, origin) {
+async function begin(user, provider, origin, write = false) {
   const cfg = await vault('config', user, provider);
   if (!isConfigured(cfg)) throw new Failure(409, 'Die Anbieterregistrierung für LifeCase fehlt.');
-  const state = nonce();
+  const state = (write ? 'w2_' : 'r2_') + nonce().slice(3);
   const verifier = nonce();
   unwrap(await service.from('lifecase_oauth_pending').upsert({
     user_id: user, provider, state_hash: hex(await hash(state)), verifier, app_url: apps.get(origin),
     expires_at: new Date(Date.now() + 10 * 60000).toISOString(),
   }, { onConflict: 'user_id,provider' }));
-  return { url: authorizationUrl(provider, cfg, callback, state, base64(await hash(verifier))) };
+  return { url: authorizationUrl(provider, cfg, callback, state, base64(await hash(verifier)), write) };
 }
 async function callbackRequest(url) {
   const state = url.searchParams.get('state') ?? '';
@@ -78,7 +79,9 @@ async function callbackRequest(url) {
   try {
     const cfg = await vault('config', user, provider);
     if (!isConfigured(cfg)) return toApp(app_url, 'failed');
-    const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier });
+    const write = state.startsWith('w2_') && provider !== 'drive';
+    const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier }, '', write);
+    if (write && !tokens.calendarWrite) return toApp(app_url, 'failed');
     const account = await profile(provider, tokens.access);
     await vault('write', user, provider, { ...account, tokens });
     return toApp(app_url, provider === 'drive' ? 'drive-connected' : 'connected');
@@ -94,7 +97,7 @@ async function activeLink(user, provider) {
   if (!isConfigured(cfg)) throw new Failure(409, 'Die Anbieterregistrierung für LifeCase fehlt.');
   let tokens;
   try {
-    tokens = await exchange(provider, cfg, { grant_type: 'refresh_token', refresh_token: link.tokens.refresh }, link.tokens.refresh);
+    tokens = await exchange(provider, cfg, { grant_type: 'refresh_token', refresh_token: link.tokens.refresh }, link.tokens.refresh, link.tokens.calendarWrite === true);
   } catch (error) {
     const newer = await vault('read', user, provider);
     if (newer && newer.revision !== link.revision && newer.tokens.expires > Date.now()) return newer;
@@ -169,6 +172,7 @@ Deno.serve(async req => {
     if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
     if (typeof provider !== 'string' || !Object.hasOwn(providers, provider)) throw new Failure(400, 'Unbekannte Verbindung.');
     if (action === 'start') return jsonify(await begin(user, provider, origin), 200, headers);
+    if (action === 'start-calendar-write' && provider !== 'drive') return jsonify(await begin(user, provider, origin, true), 200, headers);
     if (action === 'disconnect') return jsonify(await disconnect(user, provider), 200, headers);
     if (provider === 'drive') {
       if (!['drive-list', 'drive-file'].includes(action)) throw new Failure(400, 'Unbekannte Drive-Aktion.');
@@ -181,9 +185,25 @@ Deno.serve(async req => {
       const bytes = await driveOriginal(link.tokens.access, id);
       return new Response(bytes, { headers: { ...headers, 'Content-Type': 'application/octet-stream' } });
     }
-    if (!['calendar', 'mail', 'detail', 'file'].includes(action)) throw new Failure(400, 'Unbekannte LifeCase-Aktion.');
+    if (!['calendar', 'mail', 'detail', 'file', 'block-lunch'].includes(action)) throw new Failure(400, 'Unbekannte LifeCase-Aktion.');
     const link = await activeLink(user, provider);
     const access = link.tokens.access;
+    if (action === 'block-lunch') {
+      if (!link.tokens.calendarWrite) throw new Failure(403, 'Erlaube LifeCase zuerst das Blockieren im gewählten Kalender.');
+      const day = calendarDay(values, 'date');
+      const from = arg(values, 'time', 5, true);
+      const until = arg(values, 'endTime', 5, true);
+      const localTime = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Zurich', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+      const nowDay = swissDay(new Date());
+      const format = /^1[2-4]:[0-5]\d$/;
+      const toMinutes = value => Number(value.slice(0,2)) * 60 + Number(value.slice(3,5));
+      if (!format.test(from) || !format.test(until) || until > '14:00' || toMinutes(until) - toMinutes(from) < 15 ||
+          day < nowDay || (day === nowDay && from <= localTime) || Date.parse(day) - Date.parse(nowDay) > 370 * 86400000) {
+        throw new Failure(400, 'Dieses Zeitfenster kann nicht mehr blockiert werden.');
+      }
+      const key = hex(await hash([user, provider, link.account, day, from, until].join('|')));
+      return jsonify(await createLunchBlock(provider, access, day, from, until, key), 200, headers);
+    }
     if (action === 'calendar') {
       const from = calendarDay(values, 'from');
       const through = calendarDay(values, 'through');

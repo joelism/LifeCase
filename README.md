@@ -65,3 +65,9 @@ Die bestehende Veröffentlichung verwendet das Stammverzeichnis von `main`. Nach
 - **Rezepte und Arztzeugnisse** erhalten standardmässig eine Erinnerung einen Kalendermonat vor Ablauf. Die Erinnerung lässt sich einzeln ausschalten. Unter **Erinnerungen** kann das Gerät Push abonnieren. LifeCase prüft Ablaufdaten täglich um 08:00 Uhr Schweizer Zeit. Der Hinweis auf dem Sperrbildschirm enthält keine Dokumentdetails. Auf dem iPhone LifeCase über Safari dem Home-Bildschirm hinzufügen und von dort öffnen.
 - **Google Drive** nutzt die Google-OAuth-Registrierung aus Version 2.0 mit einer eigenen Lesefreigabe für Drive. Zusätzlich die Google Drive API im selben Google-Cloud-Projekt aktivieren. In **Google Drive** verbinden und einzelne Bilder oder PDFs in den privaten LifeCase-Speicher übernehmen. Es können bereits vorhandene Fälle, Arztzeugnisse oder Rezepte als Ziel gewählt werden.
 - **Mailprüfung** läuft neu um 08:00, 12:00, 16:00 und 20:00 Uhr in der Zeitzone Europe/Zurich.
+
+## Pausen im Terminassistenten
+
+Mit «Finde mir morgen eine Mittagspause» schlägt LifeCase standardmässig 45 Minuten zwischen 12:00 und 14:00 Uhr vor. Ein passender Vorschlag kann auch auf der Tagesübersicht erscheinen. LifeCase berücksichtigt gespeicherte Schichten und verbundene Kalender und prüft die Zeit nach der Bestätigung erneut. Mit «30 Minuten Mittagspause morgen» kann die Dauer geändert werden.
+
+Die Pause kann im LifeCase-Kalender gespeichert werden. Für einen verbundenen Outlook- oder Google-Kalender ist unter **Verbindungen** eine zusätzliche Schreibfreigabe nötig. Danach kann der Hauptkalender im Vorschlag ausgewählt werden. Dort wird die Pause privat als belegt gespeichert.

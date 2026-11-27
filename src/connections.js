@@ -266,9 +266,9 @@ export function makeConnections(ctx) {
       });
     });
   }
-  async function connect(provider) {
+  async function connect(provider, write = false) {
     try {
-      const data = await connection('start', { provider });
+      const data = await connection(write ? 'start-calendar-write' : 'start', { provider });
       const url = new URL(data.url);
       if (!['login.microsoftonline.com', 'accounts.google.com'].includes(url.hostname) || url.protocol !== 'https:') throw userError('Ungültige Anbieteradresse.');
       location.assign(url);
@@ -360,6 +360,7 @@ export function makeConnections(ctx) {
   function handleClick(data) {
     if ('integrationRefresh' in data) status(true);
     else if ('connect' in data) connect(data.connect);
+    else if ('connectCalendarWrite' in data) connect(data.connectCalendarWrite, true);
     else if ('disconnect' in data) disconnect(data.disconnect);
     else if ('mailProvider' in data) {
       selectMail(data.mailProvider);

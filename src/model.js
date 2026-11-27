@@ -58,7 +58,7 @@ export const sections = {
   'Kalender': {
     icon: 'calendar', noun: 'Kalendereintrag', create: 'Neuer Kalendereintrag', empty: 'Noch keine Kalendereinträge',
     description: 'Termine, Aufgaben, Fristen und Erinnerungen an einem Ort.',
-    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Rezepte', 'Chronik', 'Gesundheit', 'Beweismittel'])],
+    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Pause', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Rezepte', 'Chronik', 'Gesundheit', 'Beweismittel'])],
   },
   'Beweismittel': {
     icon: 'shield', noun: 'Beweismittel', create: 'Neues Beweismittel', empty: 'Noch keine Beweismittel',

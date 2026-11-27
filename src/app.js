@@ -28,7 +28,7 @@ const state = {
   search: defaults(), export: { ...defaults(), kind: 'all' }, excluded: new Set(), includeFiles: true,
 };
 const ctx = {
-  accountsLoaded: () => drive.activate(), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
+  accountsLoaded: () => drive.activate(), refreshCalendar: () => connected.agenda(true), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
   rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
@@ -453,7 +453,7 @@ document.addEventListener('click', async event => {
     render();
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
-  else if ('assistant' in action) assistant.open();
+  else if ('assistant' in action || 'assistantLunch' in action) assistant.open('assistantLunch' in action);
   else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);
   else if ('open' in action) {
     const item = state.rows.find(row => row.id === action.open);

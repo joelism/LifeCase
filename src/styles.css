@@ -357,3 +357,10 @@ dialog:has(.assistant-thread){margin:auto 22px 22px auto;width:min(426px,calc(10
  .dashboard-grid .empty{padding:18px 12px}
 }
 @media(max-width:370px){.top-sync{display:none}.profile-form{grid-template-columns:1fr}.profile-form>.button{justify-self:start}}
+
+.lunch-nudge{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;margin:0 0 14px;padding:11px 15px}
+.lunch-nudge p{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.assistant-tools{display:grid;justify-items:start;gap:7px}
+.assistant-tools .button{min-height:36px;padding:5px 9px;font-size:12px}
+.assistant-running{margin:0 3px}
+@media(max-width:540px){.lunch-nudge .button{grid-column:2;justify-self:start}.lunch-nudge{padding:10px 13px;gap:6px 9px}}

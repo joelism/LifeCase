@@ -1,4 +1,5 @@
 import { displayedAgenda, providers } from './connected-model.js';
+import { findLunchSlot } from './lunch.js';
 import { icon } from './icons.js';
 import { button, empty, esc, jump, options, tag } from './ui.js';
 import { CH_ZONE, calendarEntries, dateOf, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
@@ -9,7 +10,7 @@ const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: C
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
 const shortMonth = new Intl.DateTimeFormat('de-CH', { month: 'short', timeZone: CH_ZONE });
 const kindStyle = {
-  Termin: ['calendar',''], Schicht: ['clock','green'], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
+  Termin: ['calendar',''], Schicht: ['clock','green'], Pause: ['sun','green'], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
   Arztzeugnis: ['badge','rose'], Rezept: ['file','rose'], Erinnerung: ['bell','amber'], Gespräch: ['message',''],
   Arztbesuch: ['heart','rose'], Wiedervorlage: ['refresh','amber'],
 };
@@ -112,6 +113,11 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   const upcoming = timeline.filter(item => item.date > day);
   const overdue = tasks.filter(item => item.date < day);
   const todaysItems = timeline.filter(item => item.date === day);
+  const lunch = !loading && connected.accounts && !connected.calendarLoading && !connected.calendarErrors.length &&
+    todaysItems.filter(item => appointmentKinds.includes(item.kind) && item.external?.busy !== false).length >= 2 ? findLunchSlot(timeline, day) : null;
+  const lunchCard = lunch ? '<section class="lunch-nudge panel"><span class="tile-icon green">' + icon('sun', 20) +
+    '</span><div><strong>Platz für deine Mittagspause</strong><p>' + esc(lunch.time + '–' + lunch.endTime) +
+    '</p></div>' + button('Vorschlag prüfen', 'assistant-lunch', '', 'arrow') + '</section>' : '';
   const now = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
   const next = appointments.find(item => item.date > day || !item.time || item.time >= now);
   const greeting = name ? 'Hey, ' + name : 'Dein Tag';
@@ -138,7 +144,7 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
     '</div></div>' + featuredAppointment(next, day) + '</section><nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
     shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('camera', 'Dokument scannen', 'scan-start', 'document', 'amber') +
     shortcut('cart', 'Einkaufen', 'view', 'Einkaufen', 'green') + shortcut('mail', 'Posteingang', 'view', 'Posteingang', 'rose') +
-    '</nav>' + externalStatus(connected) + '<div class="dashboard-grid"><div class="dashboard-today">' + todayPanel +
+    '</nav>' + externalStatus(connected) + lunchCard + '<div class="dashboard-grid"><div class="dashboard-today">' + todayPanel +
     '</div><aside class="dashboard-side" aria-label="Wichtige Einträge">' + alerts + glance +
     (open.length ? panel('Aktive Dossiers', open.slice(0, 3).map(row => recordRow(row)).join(''), jump('Alle Fälle', 'view', 'Fälle')) : '') +
     '</aside><div class="dashboard-upcoming">' + upcomingPanel + '</div></div>';
@@ -166,7 +172,7 @@ export function sectionPage(section, rows, filter, loading) {
       empty(info.icon, loading ? 'Wird synchronisiert …' : filter ? 'Keine passenden Einträge' : info.empty, '', filter ? '' : button(info.create, 'create', section, 'plus'))) + '</section>';
 }
 
-const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['Schicht', 'Schichten'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Rezept', 'Rezepte'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
+const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['Schicht', 'Schichten'], ['Pause', 'Pausen'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Rezept', 'Rezepte'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
 export function calendarPage(rows, calendar, connected) {
   const day = today();
   const first = calendar.month + '-01';
