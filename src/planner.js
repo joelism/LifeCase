@@ -1,4 +1,5 @@
 import { archive, findRecord, message, saveRecord, userError } from './backend.js';
+import { calendarRecordTitle } from './calendar-assistant.js';
 import { providers } from './connected-model.js';
 import { lunchLabel } from './workday.js';
 import { closeDialog, editRecord, errorAt, openDialog } from './editor.js';
@@ -9,7 +10,7 @@ import { button, empty, esc, jump, options, tag } from './ui.js';
 import { heading, panel } from './views.js';
 
 const listOf = row => Array.isArray(row?.fields?.items) ? row.fields.items : [];
-const itemName = entry => entry.external?.title ?? nameOf(entry.row);
+const itemName = entry => entry.external?.title ?? calendarRecordTitle(entry.row);
 const eventKey = event => [event.provider, event.id, event.date].join('|');
 const weekdays = new Intl.DateTimeFormat('de-CH', { weekday: 'short', timeZone: CH_ZONE });
 const calendarSymbols = { Schicht: 'clock', Pause: 'sun', Frist: 'flag', Wiedervorlage: 'flag', Aufgabe: 'tasks', Arztzeugnis: 'badge', Rezept: 'file', Erinnerung: 'bell' };

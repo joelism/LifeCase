@@ -1,3 +1,4 @@
+import { calendarRecordTitle } from './calendar-assistant.js';
 import { displayedAgenda, providers } from './connected-model.js';
 import { findLunchSlot } from './lunch.js';
 import { groupWorkdays, lunchLabel } from './workday.js';
@@ -10,6 +11,7 @@ import { profileInitials, profileName } from './profile.js';
 
 const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: CH_ZONE });
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
+const dayHeading = new Intl.DateTimeFormat('de-CH', { weekday: 'long', day: 'numeric', month: 'long', timeZone: CH_ZONE });
 const shortMonth = new Intl.DateTimeFormat('de-CH', { month: 'short', timeZone: CH_ZONE });
 const kindStyle = {
   Termin: ['calendar',''], Schicht: ['clock','positive'], Pause: ['sun','positive'], Aufgabe: ['tasks','positive'], Frist: ['flag','amber'],
@@ -52,34 +54,44 @@ export const panel = (title, body, action = '') => '<section class="panel"><div 
 
 const spacingTag = item => item?.spacing ? '<span class="spacing-tag ' + (item.spacing === 'Überschneidung' ? 'collision' : '') + '">' + esc(item.spacing) + '</span>' : '';
 
-export function recordRow(row, info = '', item = null) {
+export function recordRow(row, info = '', item = null, compact = false) {
   const [symbol, color] = item ? kindStyle[item.kind] ?? ['calendar', ''] : [sections[sectionOf(row)]?.icon ?? 'file', ''];
   const status = row.archived_at ? 'Archiviert' : item ? item.kind : value(row, 'status') || value(row, 'kind');
-  const details = info || (item ? [showDate(item.date), [item.time, item.endTime].filter(Boolean).join('–'), item.state !== 'Offen' ? item.state : ''].filter(Boolean).join(' · ') :
+  const details = info || (item ? [compact ? '' : showDate(item.date), [item.time, item.endTime].filter(Boolean).join('–'), item.state !== 'Offen' ? item.state : ''].filter(Boolean).join(' · ') :
     [value(row, 'category') || value(row, 'organisation') || sectionOf(row), showDate(dateOf(row))].filter(Boolean).join(' · '));
-  const emblem = item ? '<span class="date-badge"><small>' + esc(shortMonth.format(new Date(item.date + 'T12:00:00Z'))) + '</small>' + esc(item.date.slice(-2)) + '</span>' :
+  const emblem = item && !compact ? '<span class="date-badge"><small>' + esc(shortMonth.format(new Date(item.date + 'T12:00:00Z'))) + '</small>' + esc(item.date.slice(-2)) + '</span>' :
     '<span class="tile-icon ' + color + '">' + icon(symbol, 19) + '</span>';
   return '<button type="button" class="row" data-open="' + esc(row.id) + '">' + emblem + '<span class="row-info"><span class="row-title">' +
-    esc(nameOf(row)) + '</span><span class="row-sub">' + esc(details) + '</span></span><span class="row-tail">' + spacingTag(item) + tag(status, color || statusColor(status)) + icon('right', 15) + '</span></button>';
+    esc(calendarRecordTitle(row)) + '</span><span class="row-sub">' + esc(details) + '</span></span><span class="row-tail">' + spacingTag(item) + tag(status, color || statusColor(status)) + icon('right', 15) + '</span></button>';
 }
 
-function externalRow(item) {
+function externalRow(item, compact = false) {
   const event = item.external;
   return '<button type="button" class="row external-row" data-external-open="' + esc(event.provider + '|' + event.id + '|' + event.date) + '">' +
     '<span class="provider-mark ' + event.provider + '">' + providers[event.provider].mark + '</span>' + '<span class="row-info"><span class="row-title">' + esc(event.title) +
-    '</span><span class="row-sub">' + esc([showDate(event.date), event.time || (event.allDay ? 'Ganztägig' : ''), event.location].filter(Boolean).join(' · ')) +
+    '</span><span class="row-sub">' + esc([compact ? '' : showDate(event.date), event.time || (event.allDay ? 'Ganztägig' : ''), event.location].filter(Boolean).join(' · ')) +
     '</span></span><span class="row-tail">' + spacingTag(item) + tag(providers[event.provider].calendar) + icon('right', 15) + '</span></button>';
 }
 
-function agendaRow(item) {
+function agendaRow(item, compact = false) {
   if (item.shifts) {
     return '<button type="button" class="row workday-row" data-workday="' + esc(item.row.id) + '">' +
       '<span class="tile-icon">' + icon('clock', 19) + '</span><span class="row-info"><strong class="row-title">' +
-      esc(nameOf(item.row)) + '</strong><small class="row-sub">' + esc([showDate(item.date), item.time + '–' + item.endTime].join(' · ')) +
+      esc(nameOf(item.row)) + '</strong><small class="row-sub">' + esc([compact ? '' : showDate(item.date), item.time + '–' + item.endTime].filter(Boolean).join(' · ')) +
       '</small><span class="workday-break">' + icon('sun', 14) + esc(lunchLabel(item.lunch)) + '</span></span><span class="row-tail">' +
       icon('right', 15) + '</span></button>';
   }
-  return item.external ? externalRow(item) : recordRow(item.row, '', item);
+  return item.external ? externalRow(item, compact) : recordRow(item.row, '', item, compact);
+}
+
+function upcomingRows(items) {
+  const groups = new Map();
+  for (const item of items) {
+    if (!groups.has(item.date)) groups.set(item.date, []);
+    groups.get(item.date).push(item);
+  }
+  return [...groups].map(([date, events]) => '<div class="dashboard-day"><h3>' +
+    esc(dayHeading.format(new Date(date + 'T12:00:00Z'))) + '</h3>' + events.map(item => agendaRow(item, true)).join('') + '</div>').join('');
 }
 
 function externalStatus(connected) {
@@ -111,10 +123,10 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   const lunchNudge = slot ? '<section class="lunch-nudge panel"><span class="tile-icon positive">' + icon('sun', 20) +
     '</span><div><strong>Platz für deine Mittagspause</strong><p>' + esc(slot.time + '–' + slot.endTime) +
     '</p></div>' + button('Vorschlag prüfen', 'assistant-lunch', '', 'arrow') + '</section>' : '';
-  const greeting = name ? 'Hey, ' + name : 'Dein Tag';
-  const todayPanel = panel('Heute', todaysItems.length ? todaysItems.slice(0, 4).map(agendaRow).join('') :
+  const greeting = name ? 'Hey, ' + name : 'Schön, dass du da bist';
+  const todayPanel = panel('Heute', todaysItems.length ? todaysItems.slice(0, 4).map(item => agendaRow(item, true)).join('') :
     empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute steht nichts an'), jump('Tagesansicht', 'calendar-today'));
-  const upcomingPanel = panel('Demnächst', upcoming.length ? upcoming.slice(0, 3).map(agendaRow).join('') :
+  const upcomingPanel = panel('Demnächst', upcoming.length ? upcomingRows(upcoming.slice(0, 3)) :
     empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge'), jump('Zum Kalender', 'view', 'Kalender'));
   const priorities = [
     ['Fällige Erinnerungen', reminders, 'bell', 'rose', 'Erinnerungen|'],
@@ -195,7 +207,7 @@ export function calendarPage(rows, calendar, connected) {
     (calendar.selected ? button('Tagesfilter entfernen', 'day', '', 'close') : '') +
     (Object.keys(providers).some(key => connected.accounts?.[key]?.connected) ? button('Kalender aktualisieren', 'external-reload', '', 'refresh') : '') +
     '</div>' + externalStatus(connected) + '<div class="calendar-layout">' + month +
-    panel(calendar.selected ? showDate(calendar.selected) : 'Agenda', items.length ? items.map(agendaRow).join('') :
+    panel(calendar.selected ? showDate(calendar.selected) : 'Agenda', items.length ? items.map(item => agendaRow(item)).join('') :
       empty('calendar','Keine Einträge in dieser Ansicht'), items.some(item => !item.external) ? jump('LifeCase-Termine exportieren', 'ics', 'agenda', 'download') : '') + '</div>' +
     (undated.length ? panel('Aufgaben ohne Datum', undated.map(row => recordRow(row)).join(''), jump('Meine Woche', 'view', 'Meine Woche', 'week')) : '');
 }

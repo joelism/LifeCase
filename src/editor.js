@@ -1,3 +1,4 @@
+import { calendarRecordTitle, legacyChatAppointment } from './calendar-assistant.js';
 import { icon } from './icons.js';
 import { button, empty, esc, options, tag } from './ui.js';
 import { dateOf, filesFor, isActive, linksOf, MAX_FILE, nameOf, sectionOf, sections, showDate, showTimestamp, today, value } from './model.js';
@@ -91,9 +92,12 @@ async function task(control, callback, onError = error => errorAt(dialog, error)
 export function editRecord(section, row, ctx, initial = {}) {
   const info = sections[section];
   const todayDefault = today();
+  const legacy = row && legacyChatAppointment(row);
+  const proposed = legacy ? { title: legacy.title, location: legacy.location,
+    notes: [value(row, 'notes'), 'Ursprünglicher Chat-Titel: ' + legacy.original].filter(Boolean).join('\n\n') } : {};
   const seeds = { date: ['Chronik','Kalender','Gespräche'].includes(section) ? todayDefault : '', validFrom: todayDefault, ...initial };
   const form = openDialog(row ? info.noun + ' bearbeiten' : info.create, '<div class="form-grid">' + info.fields.map(field => input(field,
-    row ? value(row, field.key) || field.initial || '' : seeds[field.key] ?? field.initial ?? '', ctx.rows(), row)).join('') +
+    row ? proposed[field.key] ?? (value(row, field.key) || field.initial || '') : seeds[field.key] ?? field.initial ?? '', ctx.rows(), row)).join('') +
     '<label class="input-wrap wide">Originaldateien<input type="file" name="originals" multiple><span class="hint">Bis zu 25 MB pro Datei.</span></label>' +
     errorBox + '</div>', button('Abbrechen', 'close') + '<button type="submit" class="button primary">' + icon('check', 18) + 'Speichern</button>', true).querySelector('form');
   if (section === 'Kalender') {
@@ -108,6 +112,7 @@ export function editRecord(section, row, ctx, initial = {}) {
     let originals;
     try {
       fields = readFields(form, info, row);
+      if (legacy) fields.chatVersion = 2;
       originals = [...form.elements.originals.files];
       if (originals.some(file => file.size > MAX_FILE)) throw userError('Eine Originaldatei darf höchstens 25 MB gross sein.');
       if (originals.some(file => file.name.length > 255)) throw userError('Ein Dateiname darf höchstens 255 Zeichen haben.');
@@ -159,8 +164,10 @@ export function openRecord(id, ctx) {
   const section = sectionOf(row);
   if (section === 'Vorbereitung') { ctx.openPreparation(row); return; }
   const info = sections[section];
+  const legacy = legacyChatAppointment(row);
+  const isAppointment = section === 'Kalender' && value(row, 'kind') === 'Termin';
   const fields = (info?.fields ?? []).filter(field => field.key !== 'title').map(field => {
-    const item = value(row, field.key);
+    const item = field.key === 'location' && legacy ? legacy.location : value(row, field.key);
     if (item === '' || (Array.isArray(item) && !item.length)) return '';
     let formatted = esc(item);
     if (field.type === 'links') formatted = chips(Array.isArray(item) ? item : [], rows);
@@ -170,19 +177,24 @@ export function openRecord(id, ctx) {
   }).join('');
   const old = ['Fall / Bereich', 'Beteiligte Personen'].map(label => row.fields[label] ? '<div><dt>' + esc(label) + '</dt><dd>' + esc(row.fields[label]) + '</dd></div>' : '').join('');
   const linked = rows.filter(item => item.id !== row.id && linksOf(item).includes(row.id));
-  const attachments = filesList(row, ctx);
+  const attachments = !isAppointment || filesFor(row, ctx.files()).length ? filesList(row, ctx) : '';
   const actionable = ['Kalender','Arztzeugnisse','Gespräche','Gesundheit'].includes(section);
   const plan = ctx.canPrepare(row) ? button('Vorbereiten', 'planner-prepare', id, 'tasks') : '';
   const followUp = !row.archived_at && (actionable || ['Fälle','Rezepte'].includes(section)) ?
     button('Wiedervorlage', 'planner-followup', id, 'flag') : '';
   const arch = row.archived_at;
   const edit = info?.fields && !arch ? button('Bearbeiten', 'edit', id, 'edit', 'primary') : '';
+  const original = legacy ? (!legacy.title ? '<p class="banner">Der frühere Chat-Titel enthält keine Terminbezeichnung. Du kannst ihn unter «Bearbeiten» ergänzen.</p>' : '') +
+    '<details class="record-extra"><summary>Ursprünglicher Chat-Titel</summary><p>' + esc(legacy.original) + '</p></details>' : '';
+  const exports = button('Verlauf', 'history', id, 'clock') + button('PDF', 'record-pdf', id, 'download') +
+    (actionable ? button('Kalenderdatei', 'ics', id, 'calendar') : '');
+  const tools = isAppointment ? '<div class="actions">' + plan + followUp + '</div><details class="record-extra"><summary>Weitere Aktionen</summary><div class="actions">' +
+    exports + '</div></details>' : '<div class="actions">' + plan + followUp + exports + '</div>';
   const output = '<div class="actions">' + tag(section) + (arch ? tag('Archiviert', 'amber') : '') +
     '<small>Aktualisiert am ' + esc(showTimestamp(row.updated_at || row.created_at)) + '</small></div><dl class="detail">' + fields + old + '</dl>' +
     (linked.length ? '<section><h3 class="subheading">Zugehörige Einträge</h3>' + chips(linked.map(item => item.id), rows) + '</section>' : '') +
-    attachments + '<div class="actions">' + plan + followUp + button('Verlauf', 'history', id, 'clock') + button('PDF', 'record-pdf', id, 'download') +
-    (actionable ? button('Kalenderdatei', 'ics', id, 'calendar') : '') + '</div>' + errorBox;
-  openDialog(nameOf(row), output, button(arch ? 'Wiederherstellen' : 'Archivieren', 'archive-record', id, 'archive') + edit);
+    attachments + original + tools + errorBox;
+  openDialog(calendarRecordTitle(row), output, button(arch ? 'Wiederherstellen' : 'Archivieren', 'archive-record', id, 'archive') + edit);
   dialog.dataset.recordId = id;
 }
 export function bindRecordActions(target, ctx) {

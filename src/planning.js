@@ -1,3 +1,4 @@
+import { calendarRecordTitle } from './calendar-assistant.js';
 import { displayedAgenda } from './connected-model.js';
 import { groupWorkdays } from './workday.js';
 import { isActive, linksOf, nameOf, sectionOf, shiftDate, today, value } from './model.js';
@@ -34,7 +35,7 @@ export function preparationSource(item) {
       date: event.originalDate || event.date, time: event.time || '', title: event.title, source: event.provider, row: null };
   }
   return { key: 'row|' + item.row.id, date: value(item.row, 'date'), time: value(item.row, 'time'),
-    title: nameOf(item.row), row: item.row, source: '' };
+    title: calendarRecordTitle(item.row), row: item.row, source: '' };
 }
 
 export function preparationForRow(row) {

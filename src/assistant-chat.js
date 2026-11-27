@@ -29,8 +29,10 @@ export function makeAssistant(ctx, currentAccounts) {
   let proposal = null;
   let target = '';
   let busy = false;
+  let lastDate = '';
+  let pendingMessage = '';
   const add = (side, text, record = '') => { history = [...history.slice(-11), { side, text, record }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; }
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; }
 
   async function agendaFor(date, strict = false) {
     const latest = currentAccounts() ?? (await connection('status').catch(() => ({}))).accounts;
@@ -112,7 +114,7 @@ export function makeAssistant(ctx, currentAccounts) {
     add('assistant', 'Mittagspause von ' + candidate.time + ' bis ' + candidate.endTime + ' ist in LifeCase eingetragen.', saved.id);
   }
   async function addAppointment(text, epoch) {
-    const result = interpretAppointment(text, draft);
+    const result = interpretAppointment(text, draft, new Date(), lastDate);
     draft = result.draft;
     if (result.status !== 'ready') { add('assistant', prompts[result.status]); return; }
     const known = await agendaFor(draft.date);
@@ -120,18 +122,21 @@ export function makeAssistant(ctx, currentAccounts) {
     const found = duplicateAppointment(known.entries, draft);
     if (found) {
       add('assistant', '«' + draft.title + '» steht am ' + showDate(draft.date) + ' um ' + draft.time + ' bereits im Kalender.', found.row?.id);
+      lastDate = draft.date;
       draft = null;
       return;
     }
     const hash = await sha256(new Blob([JSON.stringify([draft.date, draft.time, draft.title.normalize('NFKC').toLocaleLowerCase('de-CH')])]));
     if (epoch !== ctx.epoch()) return;
-    let saved = await saveIntakeRecord({ ...draft, kind: 'Termin', status: 'Offen', intakeKey: 'chat:' + hash, intakeSource: 'Terminassistent' });
+    let saved = await saveIntakeRecord({ ...draft, chatVersion: 2, kind: 'Termin', status: 'Offen', intakeKey: 'chat:' + hash, intakeSource: 'Terminassistent' });
     if (epoch !== ctx.epoch()) return;
     if (saved.archived_at) saved = await archive(saved, false);
     if (epoch !== ctx.epoch()) return;
     ctx.addRecord(saved);
     const spacing = displayedAgenda([saved, ...known.originals.filter(row => row.id !== saved.id)], known.events).find(row => row.row?.id === saved.id)?.spacing;
-    let reply = 'Eingetragen. ' + nameOf(saved) + ' am ' + showDate(draft.date) + ' um ' + draft.time + ' Uhr.';
+    lastDate = draft.date;
+    const end = draft.endTime ? '–' + (draft.endDate ? showDate(draft.endDate) + ' ' : '') + draft.endTime : '';
+    let reply = '«' + nameOf(saved) + '» eingetragen.\n' + showDate(draft.date) + ' · ' + draft.time + end + ' Uhr.';
     if (spacing === 'Knapp') reply += ' Ein anderer Termin liegt knapp daneben.';
     if (spacing === 'Überschneidung') reply += ' Der Termin überschneidet sich mit einem anderen Eintrag.';
     if (known.incomplete) reply += ' Der Abgleich mit externen Kalendern war gerade nicht vollständig.';
@@ -158,7 +163,7 @@ export function makeAssistant(ctx, currentAccounts) {
     const messages = history.length ? history.map(row => '<div class="assistant-bubble ' + row.side + '"><p>' + esc(row.text) + '</p>' +
       (row.record ? button('Eintrag ansehen','open',row.record,'calendar') : '') + '</div>').join('') :
       '<div class="assistant-bubble assistant"><p>Frag nach einer Mittagspause oder schreib mir einen Termin oder eine Aufgabe.</p></div>';
-    const controls = !proposal ? '<div class="assistant-tools">' + button('Mittagspause finden','lunch-find','','sun') + '</div>' :
+    const controls = !proposal ? '' :
       '<div class="assistant-tools">' +
       (proposal.destinations.length ? '<label class="input-wrap">Blockieren in<select data-lunch-target>' +
         options([['', 'LifeCase'], ...proposal.destinations.map(key => [key, providers[key].calendar])], target) + '</select></label>' : '') +
@@ -168,14 +173,24 @@ export function makeAssistant(ctx, currentAccounts) {
   }
   function open(autoLunch = false) {
     const dialog = openDialog('Terminassistent', '<div class="assistant-thread" aria-live="polite">' + content() + '</div>' +
-      '<form class="assistant-form"><label class="input-wrap"><span>Deine Nachricht</span><input name="request" type="text" maxlength="300" ' +
-      'placeholder="Morgen um 15:30 Arzttermin" autocomplete="off" required autofocus></label><button type="submit" class="button primary" aria-label="Nachricht senden">' +
+      '<form class="assistant-form"><button type="button" class="icon-btn" data-assistant-lunch-tool aria-label="Mittagspause finden">' + icon('sun', 20) + '</button>' +
+      '<textarea name="request" aria-label="Deine Nachricht" maxlength="500" rows="2" placeholder="Schreib mir einen Termin …" ' +
+      'enterkeyhint="send" autocomplete="off" required>' + esc(pendingMessage) + '</textarea>' +
+      '<button type="submit" class="button primary" aria-label="Nachricht senden">' +
       icon('arrow', 21) + '</button></form>');
     const form = dialog.querySelector('.assistant-form');
     const thread = dialog.querySelector('.assistant-thread');
     const field = form.elements.request;
-    const submit = form.querySelector('button');
-    const draw = () => { thread.innerHTML = content(); thread.scrollTop = thread.scrollHeight; submit.disabled = busy; };
+    const submit = form.querySelector('[type=submit]');
+    const scrollToEnd = () => { thread.scrollTop = thread.scrollHeight; };
+    const draw = () => { thread.innerHTML = content(); scrollToEnd(); submit.disabled = busy; };
+    trackViewport(dialog, form, scrollToEnd);
+    field.addEventListener('input', () => { pendingMessage = field.value; });
+    field.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      event.preventDefault();
+      if (!busy && field.value.trim()) form.requestSubmit();
+    });
     async function run(action) {
       if (busy) return;
       const epoch = ctx.epoch();
@@ -208,17 +223,18 @@ export function makeAssistant(ctx, currentAccounts) {
     });
     thread.addEventListener('click', event => {
       const control = event.target.closest('button');
-      if (control?.hasAttribute('data-lunch-find')) run(find);
       if (control?.hasAttribute('data-lunch-confirm')) { add('user', 'Ja, bitte'); run(blockLunch); }
       if (control?.hasAttribute('data-lunch-cancel')) cancel();
       if (control?.hasAttribute('data-lunch-other')) run(alternative);
     });
+    form.querySelector('[data-assistant-lunch-tool]').addEventListener('click', () => run(find));
     form.addEventListener('submit', event => {
       event.preventDefault();
       if (busy) return;
       const text = field.value.trim();
       if (!text) return;
       field.value = '';
+      pendingMessage = '';
       add('user', text);
       if (proposal && isYes(text)) return run(blockLunch);
       if (proposal && isNo(text)) return cancel();
@@ -234,4 +250,32 @@ export function makeAssistant(ctx, currentAccounts) {
     if (autoLunch && !proposal) run(find);
   }
   return { open, reset };
+}
+
+// Keep the composer above the iOS keyboard and the message list independently scrollable.
+function trackViewport(dialog, form, scrollToEnd) {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const events = new AbortController();
+  function update() {
+    if (!matchMedia('(max-width: 620px)').matches) return;
+    const height = Math.max(0, Math.min(viewport.height - 16, 590));
+    dialog.style.setProperty('--assistant-top', Math.max(0, viewport.offsetTop + viewport.height - height - 8) + 'px');
+    dialog.style.setProperty('--assistant-height', height + 'px');
+    requestAnimationFrame(scrollToEnd);
+  }
+  const observer = new MutationObserver(() => { if (!form.isConnected) cleanup(); });
+  function cleanup() {
+    events.abort();
+    observer.disconnect();
+    if (!dialog.querySelector('.assistant-form')) {
+      dialog.style.removeProperty('--assistant-top');
+      dialog.style.removeProperty('--assistant-height');
+    }
+  }
+  observer.observe(dialog, { childList: true });
+  viewport.addEventListener('resize', update, { signal: events.signal });
+  viewport.addEventListener('scroll', update, { signal: events.signal });
+  dialog.addEventListener('close', cleanup, { once: true, signal: events.signal });
+  update();
 }

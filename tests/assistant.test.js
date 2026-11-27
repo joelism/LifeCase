@@ -68,3 +68,32 @@ test('Drive asks only for its read scope, searches safely and downloads an origi
   assert.match(new URL(mock.mock.calls[0].arguments[0]).searchParams.get('q'), /Test\\'s/);
   assert.equal(new TextDecoder().decode(await driveOriginal('token','f')),'test');
 });
+
+test('the appointment chat separates a spoken title, place and duration across messages', () => {
+  const now = new Date('2026-11-27T18:00:00Z');
+  const first = interpretAppointment('Am Montag, 30.11., einen Arzttermin bei Dr. Muster im Praxiszentrum, Teststrasse 1, Aarau um 14:30', null, now);
+  assert.deepEqual(first, { status:'ready', draft:{date:'2026-11-30', time:'14:30', endTime:'', title:'Arzttermin bei Dr. Muster',
+    location:'Praxiszentrum, Teststrasse 1, Aarau'} });
+  const follow = 'danach habe ich am selben tag um 16:00 psychologin bei Beispielklinik, geht eine stunde';
+  const same = interpretAppointment(follow, null, now, first.draft.date);
+  assert.deepEqual(same, {status:'ready', draft:{date:'2026-11-30', time:'16:00', endTime:'17:00', title:'Termin bei der Psychologin', location:'Beispielklinik'} });
+  const pending = interpretAppointment(follow, null, now);
+  assert.equal(pending.status, 'missing_day');
+  assert.deepEqual(interpretAppointment('ich hab ja gesagt am selben tag, nächster montag', pending.draft, now).draft, same.draft);
+  const third = interpretAppointment('und ebenso am montag ist dann noch mein Bezugspersonengespräch mit Lea bei mir zuhause, Beispielstrasse 9, 5000 Aarau um 17:30', null, now);
+  assert.equal(third.draft.title, 'Bezugspersonengespräch mit Lea');
+  assert.equal(third.draft.location, 'Bei mir zu Hause, Beispielstrasse 9, 5000 Aarau');
+  assert.equal(interpretAppointment('Montag, 01.12., 14:30 Kontrolltermin', null, now).status, 'ambiguous');
+  assert.equal(interpretAppointment('Montag um 16:00 Kontrolltermin, dauert 1.5 Stunden', null, now).draft.endTime, '17:30');
+});
+
+test('legacy chat fragments show safe short titles and never infer a missing subject', async () => {
+  const { calendarRecordTitle, legacyChatAppointment } = await import('../src/calendar-assistant.js');
+  const row = { id:'qa', section:'Kalender', fields:{kind:'Termin', date:'2026-11-30', intakeSource:'Terminassistent',
+    title:'Und ebenso ist dann noch mein Gespräch mit Lea bei mir zuhause, Beispielstrasse 9, Aarau'} };
+  assert.equal(calendarRecordTitle(row), 'Gespräch mit Lea');
+  assert.match(legacyChatAppointment(row).location, /Beispielstrasse 9/);
+  const incomplete = { ...row, fields:{ ...row.fields, title:'Ja gesagt am selben tag, nächster' } };
+  assert.equal(calendarRecordTitle(incomplete), 'Termin · Titel prüfen');
+  assert.equal(legacyChatAppointment(incomplete).title, '');
+});
