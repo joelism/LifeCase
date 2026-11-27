@@ -167,6 +167,11 @@ dialog[open]{animation:enter .2s ease-out}
 .auth-card p{color:var(--muted)}
 .auth-card form{display:grid;gap:12px}
 .auth-card .primary{min-height:45px}
+.auth-install{padding-top:14px;border-top:1px solid var(--line)}
+.auth-install .button{width:100%;min-height:44px;color:var(--accent)}
+.install-steps ol{padding-inline-start:23px;margin:8px 0 18px}
+.install-steps li+li{margin-top:7px}
+.install-steps p{margin-top:6px}
 .auth-card .qr{display:block;width:min(195px,100%);border:7px solid #fff;background:#fff;border-radius:10px;margin:auto}
 .auth-card code{display:block;font:13px ui-monospace,monospace;overflow-wrap:anywhere;color:var(--text)}
 @keyframes enter{from{opacity:.25;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}

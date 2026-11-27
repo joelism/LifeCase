@@ -2,6 +2,8 @@
 
 LifeCase verwaltet persönliche Dossiers, Chronik, Gesundheit, Arztzeugnisse, Gespräche, Kalender, Beweismittel und Kontakte. Die App ist eine statisch bereitgestellte PWA mit Supabase Auth, der Supabase Data API und privatem Supabase Storage.
 
+[LifeCase öffnen und installieren](https://joelism.github.io/LifeCase/)
+
 ## Entwicklung
 
 Node.js 22.12 oder neuer verwenden.
@@ -49,7 +51,7 @@ Das Projekt [LifeCaseHealth.xcodeproj](ios/LifeCaseHealth.xcodeproj) in Xcode ö
 
 ### GitHub Pages
 
-Die bestehende Veröffentlichung verwendet das Stammverzeichnis von `main`. Nach Änderungen mit `npm run build:pages` die statischen Dateien im Stammverzeichnis neu erzeugen und mit den Änderungen committen. `web/index.html` ist die HTML-Quelle. Der Build für die private Site liegt weiterhin in `dist/`. Die GitHub-Version speichert ihre Anmeldung nur im Arbeitsspeicher des Tabs, weil mehrere GitHub-Projektseiten dieselbe Browser-Origin teilen.
+GitHub Pages bedient `index.html`, `app.js`, `styles.css` und die PWA-Dateien aus dem Stammverzeichnis von `main`. Die bearbeitbaren Quellen liegen in `web/index.html`, `src/app.js` und `src/styles.css`. `npm run build:pages` erzeugt die veröffentlichten Dateien neu. Auf dem iPhone lässt sich LifeCase über Safari zum Home-Bildschirm hinzufügen und im eigenen App-Fenster öffnen. Die GitHub-Version speichert ihre Anmeldung nur im Arbeitsspeicher, weil mehrere GitHub-Projektseiten dieselbe Browser-Origin teilen.
 
 ## LifeCase 2.1
 

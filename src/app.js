@@ -48,6 +48,22 @@ let noticeTimer;
 let syncVersion = 0;
 let installPrompt;
 let lastSync = 0;
+const isStandalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+
+async function installLifeCase() {
+  if (installPrompt) {
+    const prompt = installPrompt;
+    installPrompt = null;
+    try { await prompt.prompt(); return; } catch { /* Offer the browser's installation steps below. */ }
+  }
+  openDialog('LifeCase installieren',
+    '<div class="install-steps"><h3>Auf dem iPhone oder iPad</h3><ol>' +
+    '<li>Öffne LifeCase in Safari und tippe auf «Teilen».</li>' +
+    '<li>Wähle «Zu Home-Bildschirm hinzufügen».</li>' +
+    '<li>Aktiviere «Als Web-App öffnen», falls angezeigt, und tippe auf «Hinzufügen».</li>' +
+    '</ol><h3>Auf Android oder am Computer</h3><p>Wähle «App installieren» oder «Zum Startbildschirm hinzufügen» im Browsermenü.</p></div>',
+    button('Schliessen', 'close', '', '', 'primary'));
+}
 
 function notify(text) {
   notice.textContent = text;
@@ -110,7 +126,8 @@ function authPage() {
   else if (signIn) content = '<h1>Anmelden</h1><form id="login-form">' +
     '<label class="input-wrap">E-Mail-Adresse<input name="email" type="email" autocomplete="username" value="' + esc(state.email) + '" required></label>' +
     '<label class="input-wrap">Passwort<input name="password" type="password" autocomplete="current-password" required></label>' +
-    formError + '<button type="submit" class="button primary">Anmelden ' + icon('arrow', 17) + '</button></form>';
+    formError + '<button type="submit" class="button primary">Anmelden ' + icon('arrow', 17) + '</button></form>' +
+    (isStandalone() ? '' : '<div class="auth-install">' + button('LifeCase installieren', 'install', '', 'download') + '</div>');
   else if (setupError) content = '<h1>Sicherheitsprüfung</h1>' + publicEmail() + '<p>Der zweite Faktor konnte nicht geladen werden.</p>' +
     button('Erneut versuchen', 'retry-auth', '', 'refresh', 'primary') + button('Abmelden', 'signout', '', 'logout');
   else {
@@ -137,9 +154,9 @@ function settings() {
     panel('Konto und Datenschutz', '<div class="panel-body settings-content">' + publicEmail() +
       '<p>Der zweite Faktor ist aktiv. LifeCase speichert Einträge in deinem Konto und hält Originaldateien im privaten Speicher.</p><div class="actions">' +
       button('Synchronisieren', 'reload', '', 'refresh') + button('Abmelden', 'signout', '', 'logout', 'danger') + '</div></div>') +
-    panel('Installation und Erinnerungen', '<div class="panel-body settings-content"><p>Auf iPhone und iPad öffnest du LifeCase in Safari und wählst im Teilen-Menü «Zum Home-Bildschirm». Auf dem Computer findest du die Installation im Browsermenü.</p>' +
-      (installPrompt ? '<div class="actions">' + button('LifeCase installieren', 'install', '', 'download', 'primary') + '</div>' : '') +
-      '<p>Fällige Erinnerungen siehst du in LifeCase. Für Hinweise bei geschlossener App kannst du eine Kalenderdatei mit Erinnerungen in deinen Gerätekalender importieren.</p></div>');
+    panel('App auf diesem Gerät', '<div class="panel-body settings-content">' + (isStandalone() ?
+      '<p>LifeCase ist auf diesem Gerät als Web-App geöffnet.</p>' :
+      '<div class="actions">' + button('LifeCase installieren', 'install', '', 'download', 'primary') + '</div>') + '</div>');
 }
 function mainView() {
   if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, { name: profileName(state.session?.user), suggestions: daily.state.suggestions.length });
@@ -450,10 +467,11 @@ document.addEventListener('click', async event => {
   const action = target.dataset;
   if ('signout' in action) { await signOut(); return; }
   if ('retryAuth' in action) { await acceptSession(state.session); return; }
+  if ('install' in action) { await installLifeCase(); return; }
+  if ('close' in action) { closeDialog(); return; }
   if (!state.verified) return;
   if (daily.click(action) || drive.handle(action) || planner.click(action) || connected.click(action)) return;
-  if ('close' in action) closeDialog();
-  else if ('view' in action) go(action.view);
+  if ('view' in action) go(action.view);
   else if ('metric' in action) go(...action.metric.split('|'));
   else if ('reload' in action) { connected.activate(); if (['Übersicht', 'Kalender', 'Meine Woche'].includes(state.view)) connected.agenda(true); await sync(true); }
   else if ('menu' in action) {
@@ -502,10 +520,6 @@ document.addEventListener('click', async event => {
     applyTheme();
     render();
     app.querySelector('[data-theme-choice="' + state.theme + '"]')?.focus();
-  } else if ('install' in action && installPrompt) {
-    await installPrompt.prompt();
-    installPrompt = null;
-    render();
   } else bindRecordActions(target, ctx);
 });
 app.addEventListener('input', handleFilter);

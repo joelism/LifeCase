@@ -1,1 +1,3 @@
 site-assets/** linguist-generated=true -diff whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/app.js linguist-generated=true -diff whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
+/styles.css linguist-generated=true -diff
