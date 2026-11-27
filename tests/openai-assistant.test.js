@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { assistantChronicleFields, dossierEntries, findAssistantDossier } from '../src/assistant-dossiers.js';
+import { assistantChronicleFields, dossierEntries, findAssistantDossier, reviewChronicleDossier } from '../src/assistant-dossiers.js';
 import { askAssistant, assistantIntent } from '../supabase/functions/lifecase-connect/assistant.js';
 
 const now = new Date('2026-11-27T18:00:00Z');
@@ -88,10 +88,13 @@ test('a reported statement in chat keeps the exact source text and goes to the r
   assert.equal(fields.chatOriginal, original);
   assert.match(fields.notes, /Planung|planung/);
   assert.equal(dossierEntries([...caseRows, {section:'Chronik', fields}], pick.match.id).length, 1);
-  assert.throws(() => assistantIntent({ ...response, sourceQuote:'Eine erfundene Bestätigung.' },
-    now, [{ role:'user', content:original }]), { status:422 });
-  assert.throws(() => assistantIntent({ ...response, date:'2026-12-07' },
-    now, [{ role:'user', content:original }]), { status:422 });
+  const reviewed = assistantIntent({ ...response, sourceQuote:'Eine erfundene Bestätigung.' },
+    now, [{ role:'user', content:original }]);
+  assert.equal(reviewed.review, true);
+  assert.equal(reviewed.fields.notes, original);
+  const badDate = assistantIntent({ ...response, date:'2026-12-07' }, now, [{ role:'user', content:original }]);
+  assert.equal(badDate.review, true);
+  assert.equal(badDate.fields.date, '2026-11-27');
 });
 
 test('the assistant can reference a dossier when reading its entries or scheduling a related appointment', () => {
@@ -133,4 +136,42 @@ test('a medical appointment with no start time stays a draft and a model-suggest
   const changed = assistantIntent({ ...model, time: '16:00', location: 'Beispielstrasse 99' }, now, [...user, correction]);
   assert.equal(changed.fields.location, 'Beispielstrasse 99');
   assert.throws(() => assistantIntent({ ...model, appointmentType: '', appointmentProvider: '' }, now, user), { status: 422 });
+});
+
+test('a free-form chronicle follow-up stays verbatim, keeps the last case as a proposal, and never uses a reporting destination', () => {
+  const text = 'dazu kommt dass im Testbetrieb die Abholungen mehrmals später waren. das könnte ich später an den Kundendienst melden';
+  const messages = [{ role: 'user', content: 'Notiere den Liefertermin im Dossier Testbetrieb.' }, { role: 'user', content: text }];
+  const model = { ...blank, action: 'chronicle', title: 'Verzögerte Abholungen', caseQuery: 'Kundendienst',
+    sourceQuote: 'Dazu kommt, dass im Testbetrieb die Abholungen mehrmals später waren.', date: '2026-12-04', knowledge: 'observed' };
+  const intent = assistantIntent(model, now, messages);
+  assert.equal(intent.action, 'chronicle');
+  assert.equal(intent.caseQuery, '');
+  assert.equal(intent.review, true);
+  assert.equal(intent.fields.notes, text);
+  assert.equal(intent.fields.original, text);
+  assert.equal(intent.fields.date, '2026-11-27');
+  assert.equal(intent.fields.knowledge, 'unclear');
+
+  const rows = [
+    { id: 'recipient', section: 'Fälle', fields: { title: 'Kundendienst' } },
+    { id: 'previous', section: 'Fälle', fields: { title: 'Testbetrieb' } },
+  ];
+  const review = reviewChronicleDossier(rows, intent.caseQuery, 'previous');
+  assert.equal(review.preferred, 'previous');
+  assert.deepEqual(review.choices.map(row => row.id), ['previous', 'recipient']);
+  assert.equal(reviewChronicleDossier(rows, 'Kundendienst', 'previous').preferred, 'recipient');
+  assert.equal(reviewChronicleDossier(rows, '', 'missing').preferred, undefined);
+
+  const fallback = assistantIntent({ ...blank, action: 'clarify', reply: 'Was soll ich tun?' }, now, messages);
+  assert.equal(fallback.action, 'chronicle');
+  assert.equal(fallback.fields.original, text);
+});
+
+test('a malformed model answer preserves a matching follow-up for approval', async () => {
+  const content = 'ergänzend ist im Testbetrieb der Paketautomat zweimal ausgefallen.';
+  const result = await askAssistant({ apiKey: 'synthetic-key', now,
+    values: { messages: [{ role: 'user', content }] }, transport: async () => completed('invalid-json') });
+  assert.equal(result.action, 'chronicle');
+  assert.equal(result.review, true);
+  assert.equal(result.fields.notes, content);
 });

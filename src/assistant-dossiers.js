@@ -20,6 +20,14 @@ export function findAssistantDossier(rows, query) {
     { match: null, choices: matches.length ? matches : pool, mayCreate: !matches.length };
 }
 
+export function reviewChronicleDossier(rows, query, lastCaseId) {
+  const { match, choices, mayCreate } = findAssistantDossier(rows, query);
+  const available = rows.filter(isCase);
+  const preferred = match ?? (!query && available.find(row => row.id === lastCaseId));
+  const candidates = new Map([...(preferred ? [preferred] : []), ...choices, ...available].map(row => [row.id, row]));
+  return { choices: [...candidates.values()], preferred: preferred?.id, mayCreate };
+}
+
 export function dossierEntries(rows, caseId) {
   const dossier = rows.find(row => row.id === caseId && isCase(row));
   const fromDossier = new Set(dossier ? linksOf(dossier) : []);

@@ -29,6 +29,7 @@ const rules = [
   'In dieser Funktion kannst du eine einzelne Aktion vorschlagen: neuen Termin anlegen, neue Aufgabe speichern, Mittagspause suchen, einen Kalendertag anzeigen, Notiz in einem Dossier festhalten oder bisherige Dossier-Einträge anzeigen.',
   'Wähle appointment oder task bei einem eindeutigen Auftrag zur Erfassung. Im LifeCase-Chat gilt auch eine Aussage wie «habe pschologin am 1.1.2027» als Termin erfassen, wenn sie kein Beispiel, Zitat, Rückblick oder eine Frage ist. Verwende kurze Titel und trenne Ort und Zeitangaben.',
   'Nutze chronicle, wenn etwas als Notiz, Ereignis, Aufzeichnung oder Gespräch im Dossier dokumentiert werden soll. Erstelle einen kurzen neutralen Titel ohne erfundene Einzelheiten, Motive, Schlussfolgerungen oder Quellen. Wenn die Aussage fehlt oder unvollständig ist, verwende clarify.',
+  'Ein Nachtrag wie «dazu kommt, dass …» oder «ausserdem ist Folgendes vorgefallen …» kann als privater Chronikentwurf erkannt werden. Lasse caseQuery leer, wenn kein Zieldossier genannt wird. Ein möglicher künftiger Empfänger einer Meldung ist kein Zieldossier.',
   'Für chronicle ist caseQuery der vom Nutzer genannte Dossiername ohne Füllwörter. Nenne dasselbe Dossier auch in caseQuery, wenn ein Termin oder eine Aufgabe ausdrücklich dort verknüpft werden soll. Nutze case_overview zum Anzeigen vorhandener Einträge eines genannten Dossiers.',
   'sourceQuote ist bei chronicle eine wortgetreue zusammenhängende Passage, die den ganzen Sachverhalt aus einer Benutzernachricht enthält. Lasse Anweisungen zum Speichern weg und ändere keine Wörter, Grossschreibung oder Satzzeichen. Erfinde keine Aussagen oder Ursachen einzelner Personen.',
   'Bei «ich habe heute gehört» oder erkennbar weitergegebenen Informationen ist knowledge=reported. Bei ausdrücklicher eigener Wahrnehmung observed, sonst unclear. Formuliere auch im Titel mit erkennbarer Unsicherheit, etwa «Gehörte Aussage zur Schichtplanung». Das Datum bei Hörensagen bezeichnet, wann der Nutzer davon erfuhr. Falls ungenannt, verwende heute. Eine nur erwähnte Person ist nicht automatisch die Informationsquelle.',
@@ -66,25 +67,49 @@ function includesPhrase(text, phrase) {
   return needle && (' ' + words(text) + ' ').includes(' ' + needle + ' ');
 }
 
+const chronicleAddition = /^(?:und[ ,]+)?(?:dazu kommt|hinzu kommt|als nachtrag|ergänzend|ausserdem (?:ist|hat|wurde)|außerdem (?:ist|hat|wurde))(?:[ ,:.]|$)/iu;
+const usableNote = text => typeof text === 'string' && words(text).split(' ').length >= 6;
+const isChronicleAddition = text => chronicleAddition.test(text) && usableNote(text);
+
+function chronicleDraft(message, today, result = {}, quote = '') {
+  const validTitle = quote && message.includes(quote) && result.title.trim() &&
+    !/[\u0000-\u001f]/.test(result.title) && result.title.trim().length <= 160;
+  const caseQuery = /\b(?:dossier|chronik|fall)\b/iu.test(message) ? (result.caseQuery ?? '').trim().slice(0, 160) : '';
+  return { action: 'chronicle', caseQuery, review: true, fields: {
+    title: validTitle ? result.title.trim() : 'Nachtrag zur Chronik', date: today, time: '', location: '',
+    notes: message, knowledge: validTitle && ['reported', 'observed'].includes(result.knowledge) ? result.knowledge : 'unclear',
+    original: message,
+  } };
+}
+
 export function assistantIntent(result, now = new Date(), messages = []) {
   const textKeys = Object.keys(properties).filter(key => key !== 'duration');
   if (!result || textKeys.some(key => typeof result[key] !== 'string') ||
       !purposes.includes(result.action) || !Number.isInteger(result.duration)) throw badAnswer();
   const { action, date: day, time, endTime, endDate, taskKind, duration } = result;
+  const today = swissDay(now);
+  const latest = messages.at(-1)?.role === 'user' ? messages.at(-1).content : '';
+  const addition = isChronicleAddition(latest);
   if (action === 'answer' || action === 'clarify') {
+    if (addition && !latest.includes('?')) return chronicleDraft(latest, today, result, '');
     if (!result.reply.trim()) throw badAnswer();
     return { action, reply: result.reply.trim().slice(0, 900) };
   }
-  const today = swissDay(now);
   const caseQuery = result.caseQuery.trim().slice(0, 160);
   if (action === 'case_overview') return { action, caseQuery };
   if (action === 'chronicle') {
     const quote = result.sourceQuote.trim();
     const original = [...messages].reverse().find(item => item.role === 'user' && quote.length >= 8 && item.content.includes(quote))?.content;
     const title = result.title.trim();
+    if (addition) return chronicleDraft(latest, today, result, quote);
     if (!original || !title || title.length > 160 || /[\u0000-\u001f]/.test(title) ||
         !['reported', 'observed', 'unclear'].includes(result.knowledge) ||
-        (day && (!realDay(day) || day > today)) || (time && !clock.test(time))) throw badAnswer();
+        (day && (!realDay(day) || day > today)) || (time && !clock.test(time))) {
+      // Keep the user's original wording available for approval even when the model changed a quote.
+      const fallback = original || latest;
+      if (usableNote(fallback)) return chronicleDraft(fallback, today, result, quote);
+      throw new AssistantFailure(422, 'Welche Nachricht soll ich in die Chronik übernehmen?');
+    }
     return { action, caseQuery, fields: { title, date: day || today, time, location: result.location.trim().slice(0, 250),
       notes: quote, knowledge: result.knowledge, original } };
   }
@@ -189,6 +214,14 @@ export async function askAssistant({ apiKey, values, now = new Date(), transport
   const lastDate = typeof values.lastDate === 'string' && realDay(values.lastDate) ? values.lastDate : '';
   const instructions = rules + '\nJetzt in Europe/Zurich: ' + dayFormat.format(now) + ', ' + swissDay(now) +
     ' um ' + timeFormat.format(now) + '. Letzter bestätigter Termin: ' + (lastDate || 'keiner') + '.';
-  const result = await modelResponse({ apiKey, input: messages, instructions, outputFormat: format, transport });
-  return result ? assistantIntent(result, now, messages) : { action: 'answer', reply: 'Bei dieser Nachricht kann ich dir nicht helfen.' };
+  try {
+    const result = await modelResponse({ apiKey, input: messages, instructions, outputFormat: format, transport });
+    return result ? assistantIntent(result, now, messages) : { action: 'answer', reply: 'Bei dieser Nachricht kann ich dir nicht helfen.' };
+  } catch (error) {
+    const latest = messages.at(-1).content;
+    if (error instanceof AssistantFailure && error.status === 422 && isChronicleAddition(latest) && !latest.includes('?')) {
+      return chronicleDraft(latest, swissDay(now));
+    }
+    throw error;
+  }
 }

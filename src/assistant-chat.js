@@ -1,6 +1,6 @@
 import { appointmentQuestion, careIdentity, suggestAppointment } from './appointment-care.js';
 import { openAppointmentDraft, readAppointmentDraft } from './appointment-dialogs.js';
-import { assistantChronicleFields, dossierEntries, findAssistantDossier } from './assistant-dossiers.js';
+import { assistantChronicleFields, dossierEntries, findAssistantDossier, reviewChronicleDossier } from './assistant-dossiers.js';
 import { archive, records, saveIntakeRecord, saveRecord, message, userError } from './backend.js';
 import { connection } from './connections-api.js';
 import { calendarRecordTitle, duplicateAppointment, interpretAppointment, interpretTask } from './calendar-assistant.js';
@@ -37,9 +37,10 @@ export function makeAssistant(ctx, currentAccounts) {
   let aiAvailable = null;
   let aiHistory = [];
   let pendingCase = null;
+  let lastChronicleId = '';
   let pendingAppointment = null;
   const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; }
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; }
 
   async function agendaFor(date, strict = false) {
     const latest = currentAccounts() ?? (await connection('status').catch(() => ({}))).accounts;
@@ -247,8 +248,16 @@ export function makeAssistant(ctx, currentAccounts) {
     const latest = await records();
     if (epoch !== ctx.epoch()) return;
     const { match, choices, mayCreate } = findAssistantDossier(latest, intent.caseQuery);
-    if (match) return useDossier(intent, match, epoch);
-    pendingCase = { intent, choices: choices.slice(0, 8), mayCreate: mayCreate && intent.action !== 'case_overview' };
+    if (match && !intent.review) return useDossier(intent, match, epoch);
+    if (intent.action === 'chronicle' && intent.review) {
+      const review = reviewChronicleDossier(latest, intent.caseQuery, lastChronicleId);
+      const preferred = review.choices.find(row => row.id === review.preferred);
+      pendingCase = { intent, ...review, review: true };
+      add('assistant', preferred ? 'Soll ich das als privaten Nachtrag in «' + nameOf(preferred) + '» festhalten?' :
+        'In welchem Dossier soll ich den privaten Nachtrag festhalten?');
+      return;
+    }
+    pendingCase = { intent, choices, mayCreate: mayCreate && intent.action !== 'case_overview' };
     add('assistant', choices.length ?
       'Welches Dossier meinst du?' :
       mayCreate && intent.action !== 'case_overview' ? 'Das Dossier wurde nicht gefunden. Du kannst es hier anlegen.' :
@@ -292,6 +301,7 @@ export function makeAssistant(ctx, currentAccounts) {
       const saved = await saveIntakeRecord(fields, 'Chronik');
       if (epoch !== ctx.epoch()) return;
       ctx.addRecord(saved);
+      lastChronicleId = dossier.id;
       add('assistant', '«' + nameOf(saved) + '» ' + (saved.archived_at ? 'liegt im Archiv von' : 'steht in der Chronik von') +
         ' «' + nameOf(dossier) + '».\n' + showDate(fields.date) + ' · ' + fields.source, saved.id, 'Chronikeintrag öffnen');
     }
@@ -325,7 +335,8 @@ export function makeAssistant(ctx, currentAccounts) {
     const status = aiAvailable === null ? 'OpenAI-Verbindung wird geprüft …' :
       aiAvailable ? 'OpenAI verarbeitet die Nachrichten, die du hier absendest.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
     const caseControls = !busy && pendingCase ? '<div class="assistant-tools" aria-label="Dossier auswählen">' +
-      pendingCase.choices.map(row => button(nameOf(row), 'assistant-case', row.id, 'folder')).join('') +
+      pendingCase.choices.slice(0, 8).map(row => button(pendingCase.review ? 'In «' + nameOf(row) + '» speichern' : nameOf(row),
+        'assistant-case', row.id, 'folder', pendingCase.preferred === row.id ? 'primary' : '')).join('') +
       (pendingCase.mayCreate ?
         button('Dossier «' + pendingCase.intent.caseQuery + '» anlegen', 'assistant-case', 'new', 'plus') : '') +
       button('Abbrechen', 'assistant-case', 'cancel') + '</div>' : '';
@@ -427,10 +438,11 @@ export function makeAssistant(ctx, currentAccounts) {
       if (proposal && isNo(text)) return cancel();
       if (proposal && /^(?:andere zeit|später)[.! ]*$/i.test(text)) return run(alternative);
       proposal = null;
-      if (pendingAppointment && isYes(text)) { reviewAppointment(); return; }
+      if (pendingAppointment && !pendingCase && isYes(text)) { reviewAppointment(); return; }
       if (aiAvailable) {
         if (pendingCase && isNo(text)) { pendingCase = null; add('assistant', 'Auswahl abgebrochen.'); draw(); return; }
-        const picked = pendingCase && findAssistantDossier(pendingCase.choices, text).match;
+        const picked = pendingCase && (pendingCase.preferred && isYes(text) ?
+          pendingCase.choices.find(row => row.id === pendingCase.preferred) : findAssistantDossier(pendingCase.choices, text).match);
         if (picked) return run(epoch => chooseDossier(picked.id, epoch));
         pendingCase = null;
         return run(epoch => useOpenAI(text, epoch), text);
