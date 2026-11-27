@@ -1,7 +1,7 @@
 import { icon } from './icons.js';
 import { isActive, nameOf, sectionOf, showDate, showTimestamp, value } from './model.js';
 import { providers } from './connected-model.js';
-import { button, empty, esc, jump, tag } from './ui.js';
+import { button, empty, esc, tag } from './ui.js';
 import { heading, panel, recordRow } from './views.js';
 
 const shoppingRows = rows => rows.filter(row => sectionOf(row) === 'Einkaufen');
@@ -73,14 +73,4 @@ export function mailReview(state, accounts) {
       '</span><span class="row-sub">' + esc([showDate(row.details.date), row.details.time || 'Uhrzeit fehlt',
         row.details.reason || providers[row.provider].title].join(' · ')) + '</span></span>' + icon('right', 17) + '</button>').join('') :
       empty('mail', state.loading ? 'Vorschläge werden geladen …' : 'Keine offenen Vorschläge'));
-}
-
-export function everydayActions(rows, daily) {
-  const open = shoppingRows(rows).filter(isActive).reduce((count, row) => count + itemsOf(row).filter(item => !item.done).length, 0);
-  return '<div class="dashboard-links everyday-links"><div class="action-card"><span class="tile-icon green">' + icon('cart', 21) +
-    '</span><div><strong>Einkaufen</strong><p>' + (open ? open + ' offene Artikel' : 'Einkaufslisten') + '</p></div>' + jump('Öffnen','view','Einkaufen') +
-    '</div><div class="action-card"><span class="tile-icon">' + icon('camera', 21) + '</span><div><strong>Scannen</strong><p>Dokument oder Arbeitsplan</p></div>' +
-    jump('Öffnen','view','Scannen') + '</div>' +
-    '<div class="action-card"><span class="tile-icon amber">' + icon('calendar', 21) + '</span><div><strong>Terminprüfung</strong><p>' +
-    (daily.suggestions.length ? daily.suggestions.length + ' offen' : 'Termine aus E-Mails') + '</p></div>' + jump('Öffnen','view','Terminprüfung') + '</div></div>';
 }

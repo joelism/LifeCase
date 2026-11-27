@@ -94,3 +94,11 @@ test('new views retain navigation and render remote text without markup', () => 
   assert.match(mailboxView(state), /&lt;script&gt;bad/);
   assert.doesNotMatch(mailboxView(state), /<script>/);
 });
+
+test('the personalised overview escapes names and exposes its quick actions', () => {
+  const ui = dashboard([], false, { events: [], calendarErrors: [] }, { name: 'A <b>', suggestions: 2 });
+  assert.match(ui, /Hey, A &lt;b&gt;/);
+  assert.match(ui, /data-assistant/);
+  assert.match(ui, /data-scan-start="document"/);
+  assert.match(ui, /Terminvorschläge/);
+});

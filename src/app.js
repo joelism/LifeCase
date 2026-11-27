@@ -2,7 +2,7 @@ import { makeAssistant } from './assistant-chat.js';
 import { makeDrive } from './drive.js';
 import { disablePush, enablePush, pushEnabled, pushSupported } from './push.js';
 import { makeDaily } from './daily.js';
-import { everydayActions, mailReview, scanPage, shoppingPage } from './daily-views.js';
+import { mailReview, scanPage, shoppingPage } from './daily-views.js';
 import { makeConnections } from './connections.js';
 import { connectionsView, healthView, mailboxView } from './connected-views.js';
 import { db, downloadBlob, files, get, message, records, userError } from './backend.js';
@@ -10,6 +10,7 @@ import { calendarFile } from './calendar-file.js';
 import { bindRecordActions, closeDialog, editRecord, errorAt, openDialog, openRecord } from './editor.js';
 import { icon } from './icons.js';
 import { calendarEntries, nameOf, recordSections, reminderDue, sectionOf, sections, today, value } from './model.js';
+import { cleanDisplayName, profileName, profileUpdate } from './profile.js';
 import { button, empty, esc, motif } from './ui.js';
 import { brand, calendarPage, dashboard, exportCandidates, exportControls, exportKinds, exportList, heading, panel, recordRow, searchControls, searchResults, sectionPage, selectedCalendar, shell } from './views.js';
 
@@ -51,7 +52,7 @@ function notify(text) {
 function applyTheme() {
   const isDark = state.theme === 'dark' || (state.theme === 'system' && themeMedia.matches);
   document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-  document.querySelector('meta[name="theme-color"]').content = isDark ? '#101925' : '#f3f6fa';
+  document.querySelector('meta[name="theme-color"]').content = isDark ? '#101c23' : '#f2f7f6';
 }
 applyTheme();
 themeMedia.addEventListener('change', applyTheme);
@@ -100,7 +101,7 @@ function authPage() {
     state.factors.map((item, i) => '<option value="' + esc(item.id) + '">' + esc(item.friendly_name || 'Authenticator ' + (i + 1)) + '</option>').join('') + '</select></label>' : '';
   let content;
   if (boot) content = '<h1>Anmeldung</h1><p>Anmeldung wird geprüft …</p>';
-  else if (signIn) content = '<h1>Anmelden</h1><p>Verwende dein bestehendes Supabase-Konto für LifeCase.</p><form id="login-form">' +
+  else if (signIn) content = '<h1>Anmelden</h1><form id="login-form">' +
     '<label class="input-wrap">E-Mail-Adresse<input name="email" type="email" autocomplete="username" value="' + esc(state.email) + '" required></label>' +
     '<label class="input-wrap">Passwort<input name="password" type="password" autocomplete="current-password" required></label>' +
     formError + '<button type="submit" class="button primary">Anmelden ' + icon('arrow', 17) + '</button></form>';
@@ -114,12 +115,17 @@ function authPage() {
         '<form id="verify-form">' + secret + factors + codeInput + formError + '<button type="submit" class="button primary">Bestätigen</button></form>') +
       button('Abmelden', 'signout', '', 'logout');
   }
-  return '<div class="auth"><aside class="auth-visual">' + motif + brand + '<div><h2>Deine persönlichen Dossiers.</h2><p>Fälle, Termine und Gesundheitsunterlagen an einem Ort.</p></div>' +
+  return '<div class="auth"><aside class="auth-visual">' + motif + brand + '<div><h2>Willkommen bei LifeCase</h2><p>Deine Termine, Dossiers und Erinnerungen.</p></div>' +
     '<div class="privacy">' + icon('lock', 16) + 'Geschützter Zugang</div></aside><main class="auth-main"><div class="auth-card">' + content + '</div></main></div>';
 }
 function settings() {
   const themes = [['system','System','monitor'],['light','Hell','sun'],['dark','Dunkel','moon']];
-  return heading('Einstellungen') + panel('Verbindungen', '<div class="panel-body settings-content"><p>Verwalte Outlook, Gmail, Kalender und Apple Health.</p><div class="actions">' + button('Verbindungen öffnen', 'view', 'Verbindungen', 'link') + '</div></div>') +
+  const name = profileName(state.session?.user);
+  const profile = '<form id="profile-form" class="panel-body profile-form"><label class="input-wrap">Name für die Begrüssung' +
+    '<input name="displayName" type="text" autocomplete="given-name" maxlength="48" placeholder="Dein Vorname oder Spitzname" value="' +
+    esc(name) + '"></label><button type="submit" class="button primary">' + icon('check', 17) + 'Speichern</button>' +
+    '<p class="form-error wide" role="alert" hidden></p></form>';
+  return heading('Einstellungen') + panel('Persönliches Profil', profile) + panel('Verbindungen', '<div class="panel-body settings-content"><p>Verwalte Outlook, Gmail, Kalender und Apple Health.</p><div class="actions">' + button('Verbindungen öffnen', 'view', 'Verbindungen', 'link') + '</div></div>') +
     panel('Darstellung', '<div class="panel-body settings-content"><div class="theme-choices">' +
       themes.map(([id, label, symbol]) => '<button class="button" type="button" data-theme-choice="' + id + '" aria-pressed="' + (state.theme === id) + '">' + icon(symbol, 17) + esc(label) + '</button>').join('') + '</div></div>') +
     panel('Konto und Datenschutz', '<div class="panel-body settings-content">' + publicEmail() +
@@ -130,7 +136,7 @@ function settings() {
       '<p>Fällige Erinnerungen siehst du in LifeCase. Für Hinweise bei geschlossener App kannst du eine Kalenderdatei mit Erinnerungen in deinen Gerätekalender importieren.</p></div>');
 }
 function mainView() {
-  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, everydayActions(state.rows, daily.state));
+  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, { name: profileName(state.session?.user), suggestions: daily.state.suggestions.length });
   if (state.view === 'Einkaufen') return shoppingPage(state.rows, daily.state);
   if (state.view === 'Scannen') return scanPage(state.rows);
   if (state.view === 'Google Drive') return drive.view();
@@ -196,8 +202,10 @@ async function sync(showNotice = false) {
   } finally {
     if (epoch === state.epoch && revision === syncVersion) {
       state.loading = false;
+      const profileInput = state.view === 'Einstellungen' && app.querySelector('#profile-form input');
+      const profileDraft = profileInput && profileInput.value !== profileName(state.session?.user);
       const shoppingDraft = state.view === 'Einkaufen' && app.querySelector('#shop-add-form input[name="name"]')?.value;
-      if ((!shoppingDraft && !['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen', 'Terminprüfung', 'Google Drive'].includes(state.view)) || showNotice) render();
+      if ((!shoppingDraft && !profileDraft && !['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen', 'Terminprüfung', 'Google Drive'].includes(state.view)) || showNotice) render();
       else refreshResults();
     }
   }
@@ -494,7 +502,29 @@ document.addEventListener('click', async event => {
 });
 app.addEventListener('input', handleFilter);
 app.addEventListener('change', handleFilter);
+async function saveProfile(form, control) {
+  if (!state.verified || control.disabled) return;
+  const epoch = state.epoch;
+  const value = cleanDisplayName(new FormData(form).get('displayName'));
+  control.disabled = true;
+  try {
+    const result = get(await db.auth.updateUser({ data: profileUpdate(value) }));
+    if (epoch !== state.epoch) return;
+    state.session = { ...state.session, user: result.user };
+    render();
+    app.querySelector('#profile-form input')?.focus({ preventScroll: true });
+    notify('Begrüssung gespeichert.');
+  } catch (error) {
+    if (epoch === state.epoch) errorAt(form, error);
+  } finally { control.disabled = false; }
+}
+
 app.addEventListener('submit', event => {
+  if (event.target.id === 'profile-form') {
+    event.preventDefault();
+    saveProfile(event.target, event.submitter ?? event.target.querySelector('button[type="submit"]'));
+    return;
+  }
   daily.submitPage(event);
   drive.submit(event);
   if (event.target.matches('#search-form,#export-form')) event.preventDefault();
@@ -507,6 +537,7 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && state.menu) {
     state.menu = false;
     render();
+    app.querySelector('.bottom-nav [data-menu]')?.focus();
   }
   if (state.verified && !dialog.open && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
     event.preventDefault();

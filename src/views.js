@@ -1,7 +1,9 @@
 import { displayedAgenda, providers } from './connected-model.js';
 import { icon } from './icons.js';
-import { button, empty, esc, jump, motif, options, tag } from './ui.js';
+import { button, empty, esc, jump, options, tag } from './ui.js';
 import { CH_ZONE, calendarEntries, dateOf, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
+
+import { profileInitials, profileName } from './profile.js';
 
 const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: CH_ZONE });
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
@@ -13,23 +15,30 @@ const kindStyle = {
 };
 const statusColor = value => ({ Abgeschlossen: 'green', Erledigt: 'green', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
 
-export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.2</small></span>';
-const navGroups = [['', 'Übersicht', 'Kalender', 'Einkaufen', 'Scannen'], ['Posteingang', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gesundheitsdaten'], ['Werkzeuge', 'Erinnerungen', 'Google Drive', 'Suche', 'PDF-Export', 'Verbindungen']];
+export const brand = '<span class="brand"><span class="brand-mark">' + icon('logo', 25) + '</span><span>LifeCase</span></span>';
+const navGroups = [['', 'Übersicht', 'Kalender', 'Einkaufen', 'Scannen'], ['Postfach', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gesundheitsdaten'], ['Werkzeuge', 'Erinnerungen', 'Google Drive', 'Suche', 'PDF-Export', 'Verbindungen']];
 const navButton = (label, view, compact = false) => '<button class="' + (compact ? '' : 'nav-item') + '" type="button" data-view="' + esc(label) + '"' +
-  (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) + esc(label) + '</button>';
+  (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) +
+  esc(compact && label === 'Übersicht' ? 'Heute' : label) + '</button>';
 
 export function shell(view, inner, state) {
-  const activeReminderCount = calendarEntries(state.rows).filter(item => reminderDue(item, today())).length;
+  const reminders = calendarEntries(state.rows).filter(item => reminderDue(item, today())).length;
+  const name = profileName(state.session?.user);
+  const avatar = '<span class="profile-mark" aria-hidden="true">' + (name ? esc(profileInitials(name)) : icon('people', 17)) + '</span>';
   return '<div class="layout' + (state.menu ? ' menu-open' : '') + '"><button type="button" class="scrim" data-menu="" aria-label="Menü schliessen"></button>' +
     '<aside class="sidebar">' + brand + '<nav class="side-nav" aria-label="Hauptnavigation">' + navGroups.map(([label, ...group]) =>
       (label ? '<h2>' + esc(label) + '</h2>' : '') + group.map(item => navButton(item, view)).join('')).join('') +
-    '</nav><div class="sidebar-foot">' + navButton('Einstellungen', view) + '<div class="privacy">' + icon('lock', 14) + 'Privater Bereich</div></div></aside>' +
-    '<div class="workspace"><header class="top"><div class="top-date">' + icon('calendar', 17) + esc(labels.format(new Date())) +
+    '</nav><div class="sidebar-foot"><button type="button" class="side-profile" data-view="Einstellungen"' +
+    (view === 'Einstellungen' ? ' aria-current="page"' : '') + '>' + avatar + '<span class="profile-label"><strong>' + esc(name || 'Mein Profil') +
+    '</strong><small>Einstellungen</small></span>' + icon('settings', 16) + '</button></div></aside>' +
+    '<div class="workspace"><header class="top"><div class="top-location">' + icon(sections[view].icon, 16) + esc(view) +
     '</div><div class="mobile-brand">' + brand + '</div><div class="top-actions"><button class="find" type="button" data-view="Suche" aria-label="Global suchen">' +
     icon('search', 17) + '<span>Suchen</span><kbd>⌘ K</kbd></button><button type="button" class="icon-btn assistant-trigger" data-assistant aria-label="Terminassistent">' +
-    icon('chat', 21) + '</button><button type="button" class="icon-btn" data-view="Erinnerungen" aria-label="Erinnerungen' +
-    (activeReminderCount ? ', ' + activeReminderCount + ' fällig' : '') + '">' + icon('bell', 19) + '</button><button type="button" class="icon-btn" data-reload="" aria-label="Synchronisieren">' +
-    icon('refresh', 19) + '</button></div></header><main id="main" class="main" tabindex="-1">' +
+    icon('chat', 21) + '</button><button type="button" class="icon-btn notification-button" data-view="Erinnerungen" aria-label="Erinnerungen' +
+    (reminders ? ', ' + reminders + ' fällig' : '') + '">' + icon('bell', 19) +
+    (reminders ? '<span class="notice-count" aria-hidden="true">' + (reminders > 9 ? '9+' : reminders) + '</span>' : '') +
+    '</button><button type="button" class="icon-btn top-sync" data-reload aria-label="Synchronisieren">' + icon('refresh', 19) +
+    '</button></div></header><main id="main" class="main' + (view === 'Übersicht' ? ' dashboard-main' : '') + '" tabindex="-1">' +
     (state.error ? '<div class="banner" role="alert">' + icon('info', 18) + esc(state.error) + '</div>' : '') + inner +
     '</main></div><nav class="bottom-nav mobile" aria-label="Mobile Navigation">' + ['Übersicht', 'Kalender', 'Einkaufen', 'Scannen'].map(label => navButton(label, view, true)).join('') +
     '<button type="button" data-menu="" aria-expanded="' + state.menu + '">' + icon('menu', 21) + 'Mehr</button></nav></div>';
@@ -69,45 +78,70 @@ function externalStatus(connected) {
   return messages + (connected.calendarLoading ? '<p class="hint calendar-sync" role="status">Externe Kalender werden geladen …</p>' : '');
 }
 
-export function dashboard(rows, loading, connected, dailyActions = '') {
+const horizon = '<svg class="hero-horizon" viewBox="0 0 510 260" preserveAspectRatio="xMidYMid slice" fill="none" aria-hidden="true">' +
+  '<path d="M122 260C108 168 199 88 313 84c85-3 160 27 211 72M91 260C83 147 189 51 311 47c103-3 171 36 223 82M59 260C56 119 183 13 313 11c97-2 190 28 225 79M153 260c-13-73 58-135 159-138 66-2 126 21 173 51" stroke="currentColor"/>' +
+  '<path d="M242 115v20m-10-10h20M403 41v14m-7-7h14M435 190v28m-14-14h28" stroke="currentColor" stroke-linecap="round"/>' +
+  '<circle cx="242" cy="125" r="3" fill="currentColor"/><circle cx="435" cy="204" r="4" fill="currentColor"/></svg>';
+
+function shortcut(symbol, label, action, target, color = '') {
+  return '<button type="button" class="dash-shortcut" data-' + action + '="' + esc(target) + '"><span class="tile-icon ' + color + '">' +
+    icon(symbol, 19) + '</span><span>' + esc(label) + '</span>' + icon('right', 14) + '</button>';
+}
+
+function featuredAppointment(item, day) {
+  if (!item) return '';
+  const entry = item.external;
+  const title = entry ? entry.title : nameOf(item.row);
+  const action = entry ? 'external-open' : 'open';
+  const key = entry ? [entry.provider, entry.id, entry.date].join('|') : item.row.id;
+  const when = [item.date === day ? 'Heute' : showDate(item.date), item.time].filter(Boolean).join(' · ');
+  return '<button type="button" class="hero-next" data-' + action + '="' + esc(key) + '"><span class="hero-next-icon">' + icon('calendar', 19) +
+    '</span><span class="hero-next-copy"><span class="hero-next-label">Nächster Termin</span><strong>' + esc(title) +
+    '</strong><span class="hero-next-time">' + esc(when) + '</span></span>' + icon('right', 16) + '</button>';
+}
+
+export function dashboard(rows, loading, connected, { name = '', suggestions = 0 } = {}) {
   const day = today();
   const active = rows.filter(isActive);
   const open = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen');
   const timeline = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
-  const appointments = timeline.filter(item => ['Termin', 'Gespräch', 'Arztbesuch', 'Schicht'].includes(item.kind) && item.date >= day);
+  const appointmentKinds = ['Termin', 'Gespräch', 'Arztbesuch', 'Schicht'];
+  const appointments = timeline.filter(item => appointmentKinds.includes(item.kind) && item.date >= day);
   const tasks = timeline.filter(item => ['Aufgabe', 'Frist'].includes(item.kind));
-  const certs = timeline.filter(item => ['Arztzeugnis', 'Rezept'].includes(item.kind) && item.reminderDate && reminderDue(item, day));
   const reminders = timeline.filter(item => reminderDue(item, day));
-  const due = timeline.filter(item => item.date >= day || ['Aufgabe','Frist','Wiedervorlage'].includes(item.kind));
+  const upcoming = timeline.filter(item => item.date > day);
   const overdue = tasks.filter(item => item.date < day);
   const todaysItems = timeline.filter(item => item.date === day);
-  const todays = panel('Heute', todaysItems.length ? todaysItems.slice(0, 8).map(agendaRow).join('') :
-    empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute keine offenen Einträge'),
-    jump('Tagesansicht', 'calendar-today', '', 'calendar'));
-  const metricItems = [
+  const now = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+  const next = appointments.find(item => item.date > day || !item.time || item.time >= now);
+  const greeting = name ? 'Hey, ' + name : 'Dein Tag';
+  const todayPanel = panel('Heute', todaysItems.length ? todaysItems.slice(0, 8).map(agendaRow).join('') :
+    empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute steht nichts an'), jump('Tagesansicht', 'calendar-today', '', 'calendar'));
+  const upcomingPanel = panel('Als Nächstes', upcoming.length ? upcoming.slice(0, 6).map(agendaRow).join('') :
+    empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge'), jump('Kalender', 'view', 'Kalender'));
+  const glance = '<section class="dash-glance panel"><h2>Im Blick</h2><div class="dash-glance-list">' + [
     ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
-    ['Nächste Termine', appointments.length, 'calendar', 'green', 'Kalender|termine'],
-    ['Aufgaben und Fristen', tasks.length, 'tasks', 'amber', 'Kalender|aufgaben'],
-    ['Ablauf in einem Monat', certs.length, 'badge', 'rose', 'Erinnerungen|'],
-  ];
-  return '<section class="hero">' + motif + '<div><span class="hero-date">' + esc(labels.format(new Date())) +
-    '</span><h1>Dein LifeCase</h1><div class="hero-actions">' + button('Eintrag erfassen', 'quick', '', 'plus', 'hero-cta') +
-    button('Dokument scannen', 'scan-start', 'document', 'camera', 'hero-secondary') + '</div></div></section><div class="metrics">' +
-    metricItems.map(([label, count, symbol, color, target]) => '<button type="button" class="metric" data-metric="' + esc(target) + '"><span class="tile-icon ' + color + '">' + icon(symbol, 19) +
-      '</span><span class="metric-arrow">' + icon('arrow', 15) + '</span><strong>' + (loading ? '–' : count) + '</strong><span class="metric-label">' + esc(label) + '</span></button>').join('') +
-    '</div>' + (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(item => recordRow(item.row, '', item)).join(''), jump('Alle', 'view', 'Erinnerungen')) : '') +
-    externalStatus(connected) + '<div class="dash-grid">' + todays + panel('Bevorstehend', due.some(item => item.date > day) ? due.filter(item => item.date > day).slice(0, 6).map(agendaRow).join('') :
-      empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge', 'Termine, Fristen und Arztzeugnisse erscheinen hier.'), jump('Zum Kalender', 'view', 'Kalender')) +
-    panel('Offene Fälle', open.length ? open.slice(0, 5).map(row => recordRow(row)).join('') :
-      empty('folder', loading ? 'Wird synchronisiert …' : 'Keine offenen Fälle', '', button('Fall anlegen', 'create', 'Fälle', 'plus')), jump('Alle Fälle', 'view', 'Fälle')) + '</div>' + dailyActions +
-    (overdue.length ? '<div class="dash-secondary">' + panel('Überfällige Aufgaben und Fristen', overdue.slice(0, 6).map(agendaRow).join(''),
-      jump('Alle anzeigen', 'metric', 'Kalender|aufgaben')) + '</div>' : '') +
-    '<div class="dashboard-links"><div class="action-card"><span class="tile-icon rose">' + icon('activity', 21) +
-    '</span><div><strong>Gesundheitsdaten</strong><p>Apple-Health-Tageswerte ansehen</p></div>' + jump('Öffnen', 'view', 'Gesundheitsdaten') +
-    '</div><div class="action-card"><span class="tile-icon">' + icon('link', 21) +
-    '</span><div><strong>Verbindungen</strong><p>Outlook, Gmail und Kalender</p></div>' + jump('Öffnen', 'view', 'Verbindungen') +
-    '</div><div class="action-card"><span class="tile-icon">' + icon('mail', 21) +
-    '</span><div><strong>Posteingang</strong><p>E-Mails und Anhänge</p></div>' + jump('Öffnen', 'view', 'Posteingang') + '</div></div>';
+    ['Aufgaben und Fristen', tasks.length, 'tasks', 'green', 'Kalender|aufgaben'],
+    ['Fällige Erinnerungen', reminders.length, 'bell', 'rose', 'Erinnerungen|'],
+    ['Terminvorschläge', suggestions, 'mail', 'amber', 'Terminprüfung|'],
+  ].map(([label, count, symbol, color, target]) => '<button type="button" class="glance-row" data-metric="' + esc(target) +
+    '"><span class="tile-icon ' + color + '">' + icon(symbol, 16) + '</span><span>' + esc(label) + '</span><strong>' +
+    (loading ? '–' : count) + '</strong>' + icon('right', 14) + '</button>').join('') + '</div></section>';
+  const alerts = (overdue.length ? panel('Überfällige Aufgaben', overdue.slice(0, 4).map(agendaRow).join(''),
+    jump('Alle Aufgaben', 'metric', 'Kalender|aufgaben')) : '') +
+    (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(agendaRow).join(''),
+      jump('Alle Erinnerungen', 'view', 'Erinnerungen')) : '');
+  return '<section class="hero dashboard-hero">' + horizon + '<div class="hero-copy"><span class="hero-date">' +
+    icon('calendar', 15) + esc(labels.format(new Date())) + '</span><h1>' + esc(greeting) + '</h1><div class="hero-actions">' +
+    button('Terminassistent', 'assistant', '', 'chat', 'hero-cta') + (!name ?
+      '<button type="button" class="hero-personalize" data-view="Einstellungen">' + icon('people', 17) + 'Begrüssung anpassen' + '</button>' : '') +
+    '</div></div>' + featuredAppointment(next, day) + '</section><nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('camera', 'Dokument scannen', 'scan-start', 'document', 'amber') +
+    shortcut('cart', 'Einkaufen', 'view', 'Einkaufen', 'green') + shortcut('mail', 'Posteingang', 'view', 'Posteingang', 'rose') +
+    '</nav>' + externalStatus(connected) + '<div class="dashboard-grid"><div class="dashboard-today">' + todayPanel +
+    '</div><aside class="dashboard-side" aria-label="Wichtige Einträge">' + alerts + glance +
+    (open.length ? panel('Aktive Dossiers', open.slice(0, 3).map(row => recordRow(row)).join(''), jump('Alle Fälle', 'view', 'Fälle')) : '') +
+    '</aside><div class="dashboard-upcoming">' + upcomingPanel + '</div></div>';
 }
 
 export function sectionPage(section, rows, filter, loading) {
