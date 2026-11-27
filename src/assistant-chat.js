@@ -1,6 +1,6 @@
 import { archive, records, saveIntakeRecord, message, userError } from './backend.js';
 import { connection } from './connections-api.js';
-import { duplicateAppointment, interpretAppointment } from './calendar-assistant.js';
+import { duplicateAppointment, interpretAppointment, interpretTask } from './calendar-assistant.js';
 import { displayedAgenda, expandEvents, providers } from './connected-model.js';
 import { openDialog } from './editor.js';
 import { icon } from './icons.js';
@@ -9,12 +9,15 @@ import { nameOf, shiftDate, showDate, sha256, today } from './model.js';
 import { button, esc, options } from './ui.js';
 
 const prompts = {
-  unsupported: 'Schreib mir einen neuen Termin oder frag nach einer Mittagspause.',
+  unsupported: 'Schreib mir einen Termin, eine Aufgabe oder frag nach einer Mittagspause.',
   missing_title: 'Wie soll der Termin heissen?',
   missing_day: 'An welchem Tag soll ich den Termin eintragen?',
   missing_time: 'Um welche Uhrzeit ist der Termin?',
   ambiguous: 'Ich erkenne mehrere Angaben. Nenne bitte einen Termin mit einem Datum und einer Startzeit.',
   past: 'Diese Uhrzeit liegt bereits in der Vergangenheit. An welchem Tag soll ich den Termin eintragen?',
+  missing_task_title: 'Nenne die Aufgabe, zum Beispiel «Aufgabe: IV anrufen».',
+  missing_task_day: 'Nenne die Aufgabe mit Datum, zum Beispiel «Bis Freitag IV anrufen».',
+  past_task: 'Dieses Datum liegt in der Vergangenheit. Gib ein neues Datum für die Aufgabe an.',
 };
 const isYes = text => /^(?:ja(?:[, ]+bitte)?|bitte blockieren|blockieren|mach das)[.! ]*$/i.test(text);
 const isNo = text => /^(?:nein(?:[, ]+danke)?|abbrechen)[.! ]*$/i.test(text);
@@ -127,10 +130,26 @@ export function makeAssistant(ctx, currentAccounts) {
     add('assistant', reply, saved.id);
     draft = null;
   }
+  async function addTask(result, epoch) {
+    if (result.status !== 'ready') { add('assistant', prompts[result.status]); return; }
+    const fields = result.fields;
+    const hash = await sha256(new Blob([JSON.stringify([fields.kind, fields.date, fields.time, fields.title.toLocaleLowerCase('de-CH')])]));
+    if (epoch !== ctx.epoch()) return;
+    let saved = await saveIntakeRecord({ ...fields, intakeKey: 'task-chat:' + hash, intakeSource: 'Terminassistent' });
+    if (epoch !== ctx.epoch()) return;
+    if (saved.archived_at) saved = await archive(saved, false);
+    if (epoch !== ctx.epoch()) return;
+    ctx.addRecord(saved);
+    if (saved.fields.status === 'Erledigt') add('assistant', '«' + nameOf(saved) + '» ist bereits als erledigt markiert.', saved.id);
+    else add('assistant', '«' + nameOf(saved) + '» steht ' + (fields.date ?
+      'am ' + showDate(fields.date) + (fields.time ? ' um ' + fields.time + ' Uhr' : '') + ' in deiner Planung.' :
+      'unter «Aufgaben ohne Datum» in «Meine Woche».') , saved.id);
+    draft = null;
+  }
   function content() {
     const messages = history.length ? history.map(row => '<div class="assistant-bubble ' + row.side + '"><p>' + esc(row.text) + '</p>' +
       (row.record ? button('Eintrag ansehen','open',row.record,'calendar') : '') + '</div>').join('') :
-      '<div class="assistant-bubble assistant"><p>Schreib mir einen Termin oder lass mich eine freie Mittagspause finden.</p></div>';
+      '<div class="assistant-bubble assistant"><p>Frag nach einer Mittagspause oder schreib mir einen Termin oder eine Aufgabe.</p></div>';
     const controls = !proposal ? '<div class="assistant-tools">' + button('Mittagspause finden','lunch-find','','sun') + '</div>' :
       '<div class="assistant-tools">' +
       (proposal.destinations.length ? '<label class="input-wrap">Blockieren in<select data-lunch-target>' +
@@ -196,8 +215,10 @@ export function makeAssistant(ctx, currentAccounts) {
       if (proposal && isYes(text)) return run(blockLunch);
       if (proposal && isNo(text)) return cancel();
       if (proposal && /^(?:andere zeit|später)[.! ]*$/i.test(text)) return run(alternative);
+      const task = interpretTask(text);
       const request = lunchRequest(text);
       proposal = null;
+      if (task) return run(epoch => addTask(task, epoch));
       if (request) { target = ''; return run(epoch => suggestLunch(request, epoch)); }
       run(epoch => addAppointment(text, epoch));
     });

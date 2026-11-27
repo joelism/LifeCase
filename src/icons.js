@@ -1,4 +1,5 @@
 const icons = {
+  week: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18M7 15h3m4 0h3M7 18h3m4 0h3"/>',
   chat: '<path d="M21 11.5s0 6.5-8.8 6.5H8l-4 3v-4.7C2.7 15.1 2 13.5 2 11.5 2 7.4 6.2 4 11.5 4S21 7.4 21 11.5Z"/><path d="M7.5 11.5h.1m3.9 0h.1m3.9 0h.1" stroke-width="2.2"/>',
   camera: '<path d="M4 7h4l2-3h4l2 3h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="14" r="3.2"/>',
   cart: '<path d="M2 4h2l3.2 11h11.3l2.4-7H6"/><circle cx="9" cy="20" r="1.2"/><circle cx="17.5" cy="20" r="1.2"/>',

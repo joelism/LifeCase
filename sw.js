@@ -1,6 +1,6 @@
 const PREFIX = 'lifecase-shell-';
-const CACHE = 'lifecase-shell-ca079bd647d09be2';
-const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./site-assets/health-worker-B4tS79gv.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index--eh_jmz-.css","./site-assets/index-l73pBTwK.js","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-DJ1cSy_j.js","./site-assets/model-BBcOiZl3.js","./site-assets/ocr-o4e5i9lt.js","./site-assets/pdf-BDwhZCT-.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-WT8pvM8y.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
+const CACHE = 'lifecase-shell-89982d3a7dd3f5c2';
+const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./site-assets/health-worker-C-Y2IkGT.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index-BfOhjX1n.css","./site-assets/index-BqwJwGXE.js","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-DN5sBaSs.js","./site-assets/model-DpnCGh3K.js","./site-assets/ocr-o4e5i9lt.js","./site-assets/pdf-DW2Cm6KI.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-WT8pvM8y.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
 const root = new URL('./', self.location.href);
 const urls = new Set(SHELL.map(path => new URL(path, root).href));
 

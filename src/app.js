@@ -1,3 +1,5 @@
+import { makePlanner } from './planner.js';
+import { preparationForRow } from './planning.js';
 import { makeAssistant } from './assistant-chat.js';
 import { makeDrive } from './drive.js';
 import { disablePush, enablePush, pushEnabled, pushSupported } from './push.js';
@@ -28,6 +30,8 @@ const state = {
   search: defaults(), export: { ...defaults(), kind: 'all' }, excluded: new Set(), includeFiles: true,
 };
 const ctx = {
+  canPrepare: row => Boolean(preparationForRow(row)), openPreparation: row => planner.openSaved(row),
+  weekStart: () => planner.state.start, externalEvents: () => connected.state.events,
   accountsLoaded: () => drive.activate(), refreshCalendar: () => connected.agenda(true), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
   rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
@@ -38,6 +42,7 @@ const connected = makeConnections(ctx);
 const daily = makeDaily(ctx, () => connected.state.accounts);
 const assistant = makeAssistant(ctx, () => connected.state.accounts);
 const drive = makeDrive(ctx, () => connected.state.accounts, () => connected.status(true));
+const planner = makePlanner(ctx);
 let devicePush = false;
 let noticeTimer;
 let syncVersion = 0;
@@ -79,6 +84,7 @@ function cleared() {
   daily.reset();
   assistant.reset();
   drive.reset();
+  planner.reset();
   devicePush = false;
   notice.textContent = '';
   closeDialog(true);
@@ -137,6 +143,7 @@ function settings() {
 }
 function mainView() {
   if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, { name: profileName(state.session?.user), suggestions: daily.state.suggestions.length });
+  if (state.view === 'Meine Woche') return planner.view(state.rows, connected.state);
   if (state.view === 'Einkaufen') return shoppingPage(state.rows, daily.state);
   if (state.view === 'Scannen') return scanPage(state.rows);
   if (state.view === 'Google Drive') return drive.view();
@@ -164,6 +171,7 @@ function go(view, filter = '', focus = true) {
     state.calendar.selected = '';
   }
   state.view = view;
+  planner.activate();
   state.sectionFilter = filter;
   state.menu = false;
   closeDialog();
@@ -443,11 +451,11 @@ document.addEventListener('click', async event => {
   if ('signout' in action) { await signOut(); return; }
   if ('retryAuth' in action) { await acceptSession(state.session); return; }
   if (!state.verified) return;
-  if (daily.click(action) || drive.handle(action) || connected.click(action)) return;
+  if (daily.click(action) || drive.handle(action) || planner.click(action) || connected.click(action)) return;
   if ('close' in action) closeDialog();
   else if ('view' in action) go(action.view);
   else if ('metric' in action) go(...action.metric.split('|'));
-  else if ('reload' in action) { connected.activate(); if (['Übersicht', 'Kalender'].includes(state.view)) connected.agenda(true); await sync(true); }
+  else if ('reload' in action) { connected.activate(); if (['Übersicht', 'Kalender', 'Meine Woche'].includes(state.view)) connected.agenda(true); await sync(true); }
   else if ('menu' in action) {
     state.menu = !state.menu;
     render();

@@ -120,3 +120,29 @@ export function duplicateAppointment(entries, draft) {
   return entries.find(entry => entry.state === 'Offen' && entry.date === draft.date && entry.time === draft.time &&
     germanFold(entry.external?.title ?? entry.row?.fields?.title ?? entry.row?.fields?.Titel ?? '') === germanFold(draft.title));
 }
+
+export function interpretTask(input, reference = new Date()) {
+  const text = String(input ?? '').trim();
+  const explicit = /^(aufgabe|frist|wiedervorlage)\b\s*[:–-]?\s*/i.exec(text);
+  const reminder = /^erinnere? mich(?:\s+daran)?\s*[,.:]?\s*/i.exec(text);
+  const byDate = /^bis\s+/i.exec(text);
+  const prefix = explicit ?? reminder ?? byDate;
+  if (!prefix) return null;
+  const kind = ({ frist: 'Frist', wiedervorlage: 'Wiedervorlage' })[explicit?.[1]?.toLowerCase()] || 'Aufgabe';
+  const words = text.slice(prefix[0].length);
+  const days = readDays(words, reference);
+  const remainder = hideSpans(words, days);
+  const times = readClocks(remainder);
+  const title = asTitle(hideSpans(remainder, times))
+    .replace(/^(?:bis|spätestens|daran|bitte)\b\s*/i, '').replace(/\b(?:bis|spätestens)\s*$/i, '').trim();
+  if (days.length > 1 || times.length > 1 || (days.length && /\boder\b/i.test(words))) {
+    return { status: 'ambiguous' };
+  }
+  if (!title) return { status: 'missing_task_title' };
+  const date = days[0]?.date || '';
+  const time = times[0]?.time || '';
+  if (!date && (kind !== 'Aufgabe' || time || reminder || byDate)) return { status: 'missing_task_day' };
+  if (date && date < today(reference)) return { status: 'past_task' };
+  return { status: 'ready', fields: { title: title[0].toLocaleUpperCase('de-CH') + title.slice(1), kind, date, time,
+    reminderDays: date ? '0' : '', status: 'Offen' } };
+}

@@ -23,6 +23,8 @@ const location = field('location', 'Ort');
 const sectionsInArchive = ['Fälle', 'Chronik', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gespräche', 'Kalender', 'Beweismittel', 'Personen'];
 
 export const sections = {
+  'Meine Woche': { icon: 'week', description: 'Schichten, Termine und Aufgaben an einem Ort planen.' },
+  'Vorbereitung': { icon: 'tasks', noun: 'Vorbereitung', description: 'Fragen, Checkliste und Unterlagen für einen Termin.' },
   'Übersicht': { icon: 'grid', description: 'Offene Fälle, nächste Termine und aktuelle Fristen.' },
   'Fälle': {
     icon: 'folder', noun: 'Fall', create: 'Neuer Fall', empty: 'Noch keine Fälle',
@@ -58,7 +60,7 @@ export const sections = {
   'Kalender': {
     icon: 'calendar', noun: 'Kalendereintrag', create: 'Neuer Kalendereintrag', empty: 'Noch keine Kalendereinträge',
     description: 'Termine, Aufgaben, Fristen und Erinnerungen an einem Ort.',
-    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Pause', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Rezepte', 'Chronik', 'Gesundheit', 'Beweismittel'])],
+    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Pause', 'Aufgabe', 'Frist', 'Wiedervorlage', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum'), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Rezepte', 'Chronik', 'Gesundheit', 'Beweismittel', 'Kalender', 'Vorbereitung'])],
   },
   'Beweismittel': {
     icon: 'shield', noun: 'Beweismittel', create: 'Neues Beweismittel', empty: 'Noch keine Beweismittel',
@@ -153,7 +155,7 @@ export function searchRecords(records, files, query, filters = {}) {
     if (!terms.length) return true;
     const fields = Object.entries(row.fields)
       .filter(([key]) => !['caseIds', 'personIds', 'documentIds', 'relatedIds', 'Dateipfad'].includes(key))
-      .map(([key, item]) => key === 'items' && Array.isArray(item) ? item.map(entry => [entry.name, entry.quantity]).flat() : item);
+      .map(([key, item]) => key === 'items' && Array.isArray(item) ? item.map(entry => [entry.name ?? entry.title, entry.quantity]).flat() : item);
     const text = normalized([row.section, ...fields, ...linksOf(row).map(id => byId.has(id) ? nameOf(byId.get(id)) : ''), ...(fileNames.get(row.id) ?? [])].join(' '));
     return terms.every(term => text.includes(term));
   });

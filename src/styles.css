@@ -364,3 +364,52 @@ dialog:has(.assistant-thread){margin:auto 22px 22px auto;width:min(426px,calc(10
 .assistant-tools .button{min-height:36px;padding:5px 9px;font-size:12px}
 .assistant-running{margin:0 3px}
 @media(max-width:540px){.lunch-nudge .button{grid-column:2;justify-self:start}.lunch-nudge{padding:10px 13px;gap:6px 9px}}
+
+.hero-week{background:#ffffff14;border-color:#d6f6f359;color:#f4fcfa}
+.hero-week:hover{background:#d4f0e9;color:#183d38}
+.week-controls{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:10px;padding:10px 14px;text-align:center}
+.week-controls strong,.week-controls span{display:block}
+.week-controls strong{font-size:clamp(15px,2vw,19px);font-variant-numeric:tabular-nums}
+.week-controls span{margin-top:3px;color:var(--muted);font-size:12px}
+.week-strip{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin:12px 0}
+.week-strip button{display:grid;justify-items:center;gap:3px;padding:9px 2px 7px;border:1px solid var(--line);border-radius:13px;background:var(--panel);color:var(--muted)}
+.week-strip button:hover,.week-strip button[aria-pressed="true"]{background:var(--blue-bg);border-color:var(--accent);color:var(--accent)}
+.week-strip button[aria-current="date"] strong{color:var(--accent);text-decoration:underline;text-underline-offset:4px}
+.week-strip span,.week-strip small{font-size:12px}
+.week-strip strong{font-size:19px;line-height:1.1;color:var(--text)}
+.week-filters{margin:0 0 16px}
+.week-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(245px,1fr);align-items:start;gap:16px}
+.week-grid .panel-body{padding:3px 14px}
+.week-entry{display:grid;grid-template-columns:39px minmax(0,1fr) auto;align-items:center;gap:9px;min-height:64px;padding:8px 0}
+.week-entry+.week-entry{border-top:1px solid var(--line)}
+.week-entry-main{width:100%;min-height:40px;padding:4px 2px;border-radius:7px;background:transparent;text-align:left;overflow-wrap:anywhere}
+.week-entry-main:hover{color:var(--accent)}
+.week-entry-main small{display:block;font-size:12px}
+.week-entry-actions{display:flex;align-items:center;justify-content:end;gap:5px;flex-wrap:wrap}
+.week-entry-actions .button{font-size:12px;padding:5px 8px}
+.week-entry-actions:empty{display:none}
+.plan-check{display:grid;place-items:center;width:38px;height:40px;border-radius:12px;color:var(--accent);background:var(--soft);border:1px solid var(--line)}
+.plan-check:hover{background:var(--green-bg);border-color:var(--green)}
+.week-undo{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--green-bg);color:var(--green);border-radius:12px;padding:7px 10px 7px 14px;margin-bottom:12px}
+.prep-subtitle{border-left:3px solid var(--accent);padding:3px 12px;margin-bottom:13px}
+.prep-subtitle strong{font-size:19px;overflow-wrap:anywhere}
+.prep-subtitle p{margin-top:3px;color:var(--muted)}
+.prep-item{display:grid;grid-template-columns:30px minmax(0,1fr) 40px;align-items:center;gap:5px;margin-bottom:7px}
+.prep-item .check{min-height:40px}
+#prep-documents{margin-top:7px}
+@media(max-width:1100px) and (min-width:901px){
+ .week-grid{grid-template-columns:minmax(0,1.4fr) minmax(230px,1fr)}
+ .week-entry-actions{grid-column:2/-1;justify-content:start}
+}
+@media(max-width:900px){
+ .week-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:480px){
+ .week-strip{gap:4px}
+ .week-strip button{border-radius:10px}
+ .week-controls{gap:0;padding-inline:5px}
+ .week-entry-actions{grid-column:2/-1;justify-content:start}
+ .week-entry-actions .button{min-height:40px}
+ .week-grid .panel-head{padding-inline:12px}
+ .week-grid .panel-head .text-button{min-height:40px}
+}

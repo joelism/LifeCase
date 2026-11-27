@@ -59,7 +59,7 @@ export function makeConnections(ctx) {
         state.statusLoading = false;
         update(['Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive']);
         if (ctx.view() === 'Posteingang') ensureMail();
-        if (['Übersicht', 'Kalender'].includes(ctx.view())) agenda();
+        if (['Übersicht', 'Kalender', 'Meine Woche'].includes(ctx.view())) agenda();
       }
     }
   }
@@ -107,8 +107,9 @@ export function makeConnections(ctx) {
     const [year, monthNumber] = month.split('-').map(Number);
     const next = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 10);
     const dashboard = ctx.view() === 'Übersicht';
-    const from = dashboard ? today() : shiftDate(first, -6);
-    const through = dashboard ? shiftDate(from, 30) : shiftDate(next, 13);
+    const weekly = ctx.view() === 'Meine Woche';
+    const from = weekly ? shiftDate(ctx.weekStart(), -1) : dashboard ? today() : shiftDate(first, -6);
+    const through = weekly ? shiftDate(from, 8) : dashboard ? shiftDate(from, 30) : shiftDate(next, 13);
     const key = [from, through, ...wanted].join('|');
     if (!force && key === state.eventsKey && (state.calendarLoading || state.events.length || state.calendarErrors.length || state.eventsLoaded)) return;
     const serial = ++calendarSerial;
@@ -118,7 +119,7 @@ export function makeConnections(ctx) {
     state.calendarErrors = [];
     state.calendarLoading = wanted.length > 0;
     state.eventsLoaded = !wanted.length;
-    update(['Übersicht', 'Kalender']);
+    update(['Übersicht', 'Kalender', 'Meine Woche']);
     if (!wanted.length) return;
     const responses = await Promise.allSettled(wanted.map(provider => connection('calendar', { provider, from, through })));
     if (serial !== calendarSerial) return;
@@ -131,7 +132,7 @@ export function makeConnections(ctx) {
     }
     state.calendarLoading = false;
     state.eventsLoaded = true;
-    update(['Übersicht', 'Kalender']);
+    update(['Übersicht', 'Kalender', 'Meine Woche']);
   }
   async function loadHealth(force = false) {
     if (state.healthLoading || (state.healthLoaded && !force)) return;
@@ -156,10 +157,10 @@ export function makeConnections(ctx) {
   function activate() {
     const view = ctx.view();
     if (view === 'Gesundheitsdaten') return loadHealth(true);
-    if (!['Übersicht', 'Kalender', 'Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive'].includes(view)) return;
+    if (!['Übersicht', 'Kalender', 'Meine Woche', 'Verbindungen', 'Posteingang', 'Terminprüfung', 'Google Drive'].includes(view)) return;
     status();
     if (view === 'Posteingang') ensureMail();
-    if (view === 'Übersicht' || view === 'Kalender') agenda();
+    if (['Übersicht','Kalender','Meine Woche'].includes(view)) agenda();
   }
   function consumeReturn() {
     const url = new URL(location.href);
@@ -280,7 +281,8 @@ export function makeConnections(ctx) {
     const when = [showDate(entry.date), entry.time || (entry.allDay ? 'Ganztägig' : '')].filter(Boolean).join(' · ');
     const body = '<dl class="detail"><div><dt>Quelle</dt><dd>' + esc(providers[entry.provider].calendar) + '</dd></div><div><dt>Datum</dt><dd>' +
       esc(when) + '</dd></div>' + (entry.location ? '<div><dt>Ort</dt><dd>' + esc(entry.location) + '</dd></div>' : '') + '</dl>';
-    openDialog(entry.title, body, button('Schliessen', 'close') + button('Aufgabe erstellen', 'event-task', key, 'plus', 'primary'));
+    openDialog(entry.title, body, button('Schliessen', 'close') + button('Aufgabe erstellen', 'event-task', key, 'plus') +
+      (!entry.lifeCasePause ? button('Vorbereiten', 'planner-external', key, 'tasks', 'primary') : ''));
   }
   function startHealthImport() {
     const form = openDialog('Apple-Health-Export importieren', '<p>Öffne die Health-App auf dem iPhone, tippe auf dein Profil und wähle «Alle Gesundheitsdaten exportieren». Wähle anschliessend hier die ZIP- oder XML-Datei aus.</p>' +

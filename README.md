@@ -71,3 +71,9 @@ Die bestehende Veröffentlichung verwendet das Stammverzeichnis von `main`. Nach
 Mit «Finde mir morgen eine Mittagspause» schlägt LifeCase standardmässig 45 Minuten zwischen 12:00 und 14:00 Uhr vor. Ein passender Vorschlag kann auch auf der Tagesübersicht erscheinen. LifeCase berücksichtigt gespeicherte Schichten und verbundene Kalender und prüft die Zeit nach der Bestätigung erneut. Mit «30 Minuten Mittagspause morgen» kann die Dauer geändert werden.
 
 Die Pause kann im LifeCase-Kalender gespeichert werden. Für einen verbundenen Outlook- oder Google-Kalender ist unter **Verbindungen** eine zusätzliche Schreibfreigabe nötig. Danach kann der Hauptkalender im Vorschlag ausgewählt werden. Dort wird die Pause privat als belegt gespeichert.
+
+## LifeCase 2.3
+
+- **Meine Woche** zeigt die nächsten sieben Tage mit Terminen, Schichten, Aufgaben und Fristen. Überfällige und undatierte Aufgaben bleiben griffbereit und lassen sich direkt erledigen.
+- **Vorbereitung** speichert Fragen, Stichpunkte und eine abhakbare Liste zu einem Termin. Verknüpfte Dossiers bringen passende Unterlagen in die Ansicht.
+- **Wiedervorlage** legt aus einem Dossier oder Eintrag eine verknüpfte Aufgabe an. Im Chat funktionieren auch Eingaben wie «Bis Freitag IV anrufen» und «Aufgabe: Milch kaufen».

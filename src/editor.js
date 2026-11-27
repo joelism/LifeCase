@@ -64,6 +64,10 @@ function readFields(form, info, row) {
       if (field.required && fields[field.key] === '') throw userError('Bitte fülle «' + field.label + '» aus.');
     }
   }
+  if (info === sections.Kalender && !fields.date && fields.kind !== 'Aufgabe') throw userError('Wähle ein Datum für diesen Eintrag.');
+  if (info === sections.Kalender && !fields.date && (fields.time || fields.endTime || fields.endDate || fields.reminderDays)) {
+    throw userError('Uhrzeit, Enddatum und Erinnerung benötigen ein Datum.');
+  }
   if (fields.validFrom && fields.validUntil < fields.validFrom) throw userError('«Gültig bis» muss auf oder nach «Gültig ab» liegen.');
   if (fields.date && fields.endDate && fields.endDate < fields.date) throw userError('Das Ende muss auf oder nach dem Beginn liegen.');
   if (fields.endTime && (!fields.time || ((!fields.endDate || fields.endDate === fields.date) && fields.endTime <= fields.time))) throw userError('Gib eine Uhrzeit und eine spätere Endzeit an.');
@@ -92,6 +96,11 @@ export function editRecord(section, row, ctx, initial = {}) {
     row ? value(row, field.key) || field.initial || '' : seeds[field.key] ?? field.initial ?? '', ctx.rows(), row)).join('') +
     '<label class="input-wrap wide">Originaldateien<input type="file" name="originals" multiple><span class="hint">Bis zu 25 MB pro Datei.</span></label>' +
     errorBox + '</div>', button('Abbrechen', 'close') + '<button type="submit" class="button primary">' + icon('check', 18) + 'Speichern</button>', true).querySelector('form');
+  if (section === 'Kalender') {
+    const enforceDate = () => { form.elements.date.required = form.elements.kind.value !== 'Aufgabe'; };
+    form.elements.kind.addEventListener('change', enforceDate);
+    enforceDate();
+  }
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (busy) return;
@@ -148,6 +157,7 @@ export function openRecord(id, ctx) {
   const row = rows.find(item => item.id === id);
   if (!row) return;
   const section = sectionOf(row);
+  if (section === 'Vorbereitung') { ctx.openPreparation(row); return; }
   const info = sections[section];
   const fields = (info?.fields ?? []).filter(field => field.key !== 'title').map(field => {
     const item = value(row, field.key);
@@ -162,12 +172,15 @@ export function openRecord(id, ctx) {
   const linked = rows.filter(item => item.id !== row.id && linksOf(item).includes(row.id));
   const attachments = filesList(row, ctx);
   const actionable = ['Kalender','Arztzeugnisse','Gespräche','Gesundheit'].includes(section);
+  const plan = ctx.canPrepare(row) ? button('Vorbereiten', 'planner-prepare', id, 'tasks') : '';
+  const followUp = !row.archived_at && (actionable || ['Fälle','Rezepte'].includes(section)) ?
+    button('Wiedervorlage', 'planner-followup', id, 'flag') : '';
   const arch = row.archived_at;
   const edit = info?.fields && !arch ? button('Bearbeiten', 'edit', id, 'edit', 'primary') : '';
   const output = '<div class="actions">' + tag(section) + (arch ? tag('Archiviert', 'amber') : '') +
     '<small>Aktualisiert am ' + esc(showTimestamp(row.updated_at || row.created_at)) + '</small></div><dl class="detail">' + fields + old + '</dl>' +
     (linked.length ? '<section><h3 class="subheading">Zugehörige Einträge</h3>' + chips(linked.map(item => item.id), rows) + '</section>' : '') +
-    attachments + '<div class="actions">' + button('Verlauf', 'history', id, 'clock') + button('PDF', 'record-pdf', id, 'download') +
+    attachments + '<div class="actions">' + plan + followUp + button('Verlauf', 'history', id, 'clock') + button('PDF', 'record-pdf', id, 'download') +
     (actionable ? button('Kalenderdatei', 'ics', id, 'calendar') : '') + '</div>' + errorBox;
   openDialog(nameOf(row), output, button(arch ? 'Wiederherstellen' : 'Archivieren', 'archive-record', id, 'archive') + edit);
   dialog.dataset.recordId = id;
