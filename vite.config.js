@@ -4,12 +4,14 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: './',
-  build: { target: ['safari16.4', 'chrome110', 'firefox115'] },
+  root: 'web',
+  publicDir: '../public',
+  build: { outDir: '../dist', emptyOutDir: true, assetsDir: 'site-assets', target: ['safari16.4', 'chrome110', 'firefox115'] },
   plugins: [{
     name: 'lifecase-offline-shell',
     apply: 'build',
     async closeBundle() {
-      const assets = (await readdir('dist/assets')).sort().map(name => './assets/' + name);
+      const assets = (await readdir('dist/site-assets')).sort().map(name => './site-assets/' + name);
       const paths = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', ...assets];
       const worker = await readFile('public/sw.js', 'utf8');
       const html = await readFile('dist/index.html');

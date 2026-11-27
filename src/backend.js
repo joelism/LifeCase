@@ -5,7 +5,8 @@ import { BUCKET, MAX_FILE, sha256 } from './model.js';
 export const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
     storageKey: 'lifecase-auth-v1',
-    persistSession: true,
+    // GitHub project sites share a browser origin with the owner's other apps.
+    persistSession: globalThis.location?.hostname !== 'joelism.github.io',
     detectSessionInUrl: false,
     flowType: 'pkce',
   },
@@ -56,15 +57,21 @@ async function finishFile(id) {
     .eq('id', id).is('uploaded_at', null).select().maybeSingle());
   return data ?? get(await db.from('lifecase_files').select().eq('id', id).single());
 }
-export async function uploadOriginal(row, file, reservation) {
+export async function uploadOriginal(row, file, reservation, proposedId) {
   if (file.size > MAX_FILE) throw userError('Eine Originaldatei darf höchstens 25 MB gross sein.');
   if (file.name.length > 255) throw userError('Der Dateiname darf höchstens 255 Zeichen haben.');
   const digest = await sha256(file);
   if (reservation && reservation.sha256 !== digest) throw userError('Wähle dieselbe Originaldatei wie beim ersten Upload.');
-  const saved = reservation ?? get(await db.from('lifecase_files').insert({
-    record_id: row.id, original_name: file.name, size_bytes: file.size,
-    mime_type: file.type || 'application/octet-stream', sha256: digest,
-  }).select().single());
+  let saved = reservation;
+  if (!saved) {
+    const attempt = await db.from('lifecase_files').insert({
+      ...(proposedId ? { id: proposedId } : {}), record_id: row.id, original_name: file.name, size_bytes: file.size,
+      mime_type: file.type || 'application/octet-stream', sha256: digest,
+    }).select().single();
+    saved = proposedId && attempt.error?.code === '23505' ?
+      get(await db.from('lifecase_files').select('*').eq('id', proposedId).single()) : get(attempt);
+  }
+  if (saved.uploaded_at) return saved;
   const bucket = db.storage.from(BUCKET);
   const result = await bucket.upload(saved.path, file, {
     upsert: false, contentType: 'application/octet-stream', cacheControl: '0',
@@ -91,4 +98,21 @@ export async function downloadOriginal(file) {
   const data = get(await db.storage.from(BUCKET).download(file.path));
   if (file.sha256 && await sha256(data) !== file.sha256) throw userError('Die Prüfsumme stimmt nicht überein. Die Datei wurde nicht heruntergeladen.');
   downloadBlob(new Blob([data], { type: 'application/octet-stream' }), file.original_name);
+}
+
+export async function saveImportedMail(fields) {
+  const result = await db.from('lifecase_records').insert({ section: 'Beweismittel', fields }).select().single();
+  if (result.error?.code !== '23505') return get(result);
+  return get(await db.from('lifecase_records').select('*').eq('fields->>externalKey', fields.externalKey).single());
+}
+
+export async function storeImportedOriginal(row, file) {
+  const digest = await sha256(file);
+  const existing = get(await db.from('lifecase_files').select('*').eq('record_id', row.id)
+    .eq('sha256', digest).eq('original_name', file.name).order('reserved_at').limit(1).maybeSingle());
+  if (existing?.uploaded_at) return existing;
+  const fingerprint = await sha256(new Blob([JSON.stringify([row.id, file.name, digest])]));
+  const proposedId = [fingerprint.slice(0, 8), fingerprint.slice(8, 12), '4' + fingerprint.slice(13, 16),
+    'a' + fingerprint.slice(17, 20), fingerprint.slice(20, 32)].join('-');
+  return uploadOriginal(row, file, existing, proposedId);
 }

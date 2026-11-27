@@ -50,7 +50,7 @@ export const sections = {
   'Kalender': {
     icon: 'calendar', noun: 'Kalendereintrag', create: 'Neuer Kalendereintrag', empty: 'Noch keine Kalendereinträge',
     description: 'Termine, Aufgaben, Fristen und Erinnerungen an einem Ort.',
-    fields: [title(), select('kind', 'Art', ['Termin', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Gespräche, Zeugnisse und Ereignisse', ['Gespräche', 'Arztzeugnisse', 'Chronik', 'Gesundheit'])],
+    fields: [title(), select('kind', 'Art', ['Termin', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Chronik', 'Gesundheit', 'Beweismittel'])],
   },
   'Beweismittel': {
     icon: 'shield', noun: 'Beweismittel', create: 'Neues Beweismittel', empty: 'Noch keine Beweismittel',
@@ -62,6 +62,9 @@ export const sections = {
     description: 'Ansprechpartner und ihre Verbindungen zu deinen Fällen.',
     fields: [title('Vor- und Nachname'), field('role', 'Funktion'), field('organisation', 'Organisation'), field('email', 'E-Mail-Adresse', 'email'), field('phone', 'Telefon', 'tel'), field('address', 'Adresse'), notes('notes', 'Notizen'), cases],
   },
+  'Gesundheitsdaten': { icon: 'activity', description: 'Tageswerte aus Apple Health und ihr Verlauf.' },
+  'Posteingang': { icon: 'mail', description: 'Wichtige E-Mails und Anhänge in deinen Dossiers ablegen.' },
+  'Verbindungen': { icon: 'link', description: 'Konten und Datenquellen für LifeCase verwalten.' },
   'Suche': { icon: 'search', description: 'Einträge, Originaldateien und verknüpfte Inhalte finden.' },
   'PDF-Export': { icon: 'download', description: 'Dossiers und Übersichten mit den gewünschten Inhalten erstellen.' },
   'Einstellungen': { icon: 'settings', description: 'Darstellung, Anmeldung und Installation verwalten.' },

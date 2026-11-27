@@ -1,4 +1,8 @@
 const icons = {
+  mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',
+  link: '<path d="M10 13.5a3.5 3.5 0 0 0 5 .2l4-4a3.5 3.5 0 0 0-5-5l-2 2m2 3.8a3.5 3.5 0 0 0-5-.2l-4 4a3.5 3.5 0 0 0 5 5l2-2"/>',
+  activity: '<path d="M2 12h5l3-7 4 14 3-7h5"/>',
+  paperclip: '<path d="m8 14 7-7a2.3 2.3 0 0 1 3.3 3.3l-8 8a4 4 0 0 1-5.7-5.7l8.7-8.7"/>',
   logo: '<path d="M6 5h4l2 3h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a3 3 0 0 1 3-3Z"/><path d="M7 14h2l1.5-2.5 2 4L14 14h3"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/>',
   folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',

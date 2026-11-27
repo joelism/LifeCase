@@ -1,3 +1,4 @@
+import { displayedAgenda, providers } from './connected-model.js';
 import { icon } from './icons.js';
 import { button, empty, esc, jump, motif, options, tag } from './ui.js';
 import { CH_ZONE, calendarEntries, dateOf, dayDistance, isActive, nameOf, recordSections, reminderDue, searchRecords, sectionOf, sections, shiftDate, showDate, today, value } from './model.js';
@@ -12,8 +13,8 @@ const kindStyle = {
 };
 const statusColor = value => ({ Abgeschlossen: 'green', Erledigt: 'green', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
 
-export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span></span>';
-const navGroups = [['', 'Übersicht'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Kalender', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse'], ['Werkzeuge', 'Suche', 'PDF-Export']];
+export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.0</small></span>';
+const navGroups = [['', 'Übersicht', 'Kalender', 'Posteingang'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Gesundheitsdaten'], ['Werkzeuge', 'Suche', 'PDF-Export', 'Verbindungen']];
 const navButton = (label, view, compact = false) => '<button class="' + (compact ? '' : 'nav-item') + '" type="button" data-view="' + esc(label) + '"' +
   (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) + esc(label) + '</button>';
 
@@ -29,7 +30,7 @@ export function shell(view, inner, state) {
     (activeReminderCount ? ', ' + activeReminderCount + ' fällig' : '') + '">' + icon('bell', 19) + '</button><button type="button" class="icon-btn" data-reload="" aria-label="Synchronisieren">' +
     icon('refresh', 19) + '</button></div></header><main id="main" class="main" tabindex="-1">' +
     (state.error ? '<div class="banner" role="alert">' + icon('info', 18) + esc(state.error) + '</div>' : '') + inner +
-    '</main></div><nav class="bottom-nav mobile" aria-label="Mobile Navigation">' + ['Übersicht', 'Fälle', 'Kalender'].map(label => navButton(label, view, true)).join('') +
+    '</main></div><nav class="bottom-nav mobile" aria-label="Mobile Navigation">' + ['Übersicht', 'Fälle', 'Kalender', 'Posteingang'].map(label => navButton(label, view, true)).join('') +
     '<button type="button" data-menu="" aria-expanded="' + state.menu + '">' + icon('menu', 21) + 'Mehr</button></nav></div>';
 }
 export const heading = (section, actions = '') => '<div class="heading"><div><h1>' + esc(section) + '</h1><p>' + esc(sections[section].description) + '</p></div>' +
@@ -47,31 +48,57 @@ export function recordRow(row, info = '', item = null) {
     esc(nameOf(row)) + '</span><span class="row-sub">' + esc(details) + '</span></span><span class="row-tail">' + tag(status, color || statusColor(status)) + icon('right', 15) + '</span></button>';
 }
 
-export function dashboard(rows, loading) {
+function externalRow(item) {
+  const event = item.external;
+  return '<button type="button" class="row external-row" data-external-open="' + esc(event.provider + '|' + event.id + '|' + event.date) + '">' +
+    '<span class="provider-mark ' + event.provider + '">' + providers[event.provider].mark + '</span>' + '<span class="row-info"><span class="row-title">' + esc(event.title) +
+    '</span><span class="row-sub">' + esc([showDate(event.date), event.time || (event.allDay ? 'Ganztägig' : ''), event.location].filter(Boolean).join(' · ')) +
+    '</span></span><span class="row-tail">' + tag(providers[event.provider].calendar) + icon('right', 15) + '</span></button>';
+}
+
+function agendaRow(item) {
+  return item.external ? externalRow(item) : recordRow(item.row, '', item);
+}
+
+function externalStatus(connected) {
+  if (!connected) return '';
+  const messages = connected.calendarErrors.map(err => '<div class="banner" role="status">' + esc(err) + '</div>').join('');
+  return messages + (connected.calendarLoading ? '<p class="hint calendar-sync" role="status">Externe Kalender werden geladen …</p>' : '');
+}
+
+export function dashboard(rows, loading, connected) {
   const day = today();
   const active = rows.filter(isActive);
   const open = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen');
-  const timeline = calendarEntries(active).filter(item => item.state === 'Offen');
+  const timeline = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
   const appointments = timeline.filter(item => ['Termin', 'Gespräch', 'Arztbesuch'].includes(item.kind) && item.date >= day);
   const tasks = timeline.filter(item => ['Aufgabe', 'Frist'].includes(item.kind));
   const certs = timeline.filter(item => item.kind === 'Arztzeugnis' && item.date >= day && dayDistance(day, item.date) <= 30);
   const reminders = timeline.filter(item => reminderDue(item, day));
   const due = timeline.filter(item => item.date >= day || ['Aufgabe','Frist','Wiedervorlage'].includes(item.kind));
+  const overdue = tasks.filter(item => item.date < day);
   const metricItems = [
     ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
     ['Nächste Termine', appointments.length, 'calendar', 'green', 'Kalender|termine'],
     ['Aufgaben und Fristen', tasks.length, 'tasks', 'amber', 'Kalender|aufgaben'],
     ['Zeugnisse bis in 30 Tagen', certs.length, 'badge', 'rose', 'Arztzeugnisse|bald'],
   ];
-  return '<section class="hero">' + motif + '<div><h1>Übersicht</h1><p>' + esc(sections['Übersicht'].description) + '</p>' +
-    button('Eintrag erfassen', 'quick', '', 'plus', 'hero-cta') + '</div></section><div class="metrics">' +
+  return '<section class="hero">' + motif + '<div><span class="hero-date">' + esc(labels.format(new Date())) +
+    '</span><h1>Dein LifeCase</h1><div class="hero-actions">' + button('Eintrag erfassen', 'quick', '', 'plus', 'hero-cta') +
+    button('Posteingang', 'view', 'Posteingang', 'mail', 'hero-secondary') + '</div></div></section><div class="metrics">' +
     metricItems.map(([label, count, symbol, color, target]) => '<button type="button" class="metric" data-metric="' + esc(target) + '"><span class="tile-icon ' + color + '">' + icon(symbol, 19) +
       '</span><span class="metric-arrow">' + icon('arrow', 15) + '</span><strong>' + (loading ? '–' : count) + '</strong><span class="metric-label">' + esc(label) + '</span></button>').join('') +
     '</div>' + (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(item => recordRow(item.row, '', item)).join(''), jump('Alle', 'reminders', '')) : '') +
-    '<div class="dash-grid">' + panel('Bevorstehend', due.length ? due.slice(0, 5).map(item => recordRow(item.row, '', item)).join('') :
+    externalStatus(connected) + '<div class="dash-grid">' + panel('Bevorstehend', due.length ? due.slice(0, 6).map(agendaRow).join('') :
       empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge', 'Termine, Fristen und Arztzeugnisse erscheinen hier.'), jump('Zum Kalender', 'view', 'Kalender')) +
     panel('Offene Fälle', open.length ? open.slice(0, 5).map(row => recordRow(row)).join('') :
-      empty('folder', loading ? 'Wird synchronisiert …' : 'Keine offenen Fälle', '', button('Fall anlegen', 'create', 'Fälle', 'plus')), jump('Alle Fälle', 'view', 'Fälle')) + '</div>';
+      empty('folder', loading ? 'Wird synchronisiert …' : 'Keine offenen Fälle', '', button('Fall anlegen', 'create', 'Fälle', 'plus')), jump('Alle Fälle', 'view', 'Fälle')) + '</div>' +
+    (overdue.length ? '<div class="dash-secondary">' + panel('Überfällige Aufgaben und Fristen', overdue.slice(0, 6).map(agendaRow).join(''),
+      jump('Alle anzeigen', 'metric', 'Kalender|aufgaben')) + '</div>' : '') +
+    '<div class="dashboard-links"><div class="action-card"><span class="tile-icon rose">' + icon('activity', 21) +
+    '</span><div><strong>Gesundheitsdaten</strong><p>Apple-Health-Tageswerte ansehen</p></div>' + jump('Öffnen', 'view', 'Gesundheitsdaten') +
+    '</div><div class="action-card"><span class="tile-icon">' + icon('link', 21) +
+    '</span><div><strong>Verbindungen</strong><p>Outlook, Gmail und Kalender</p></div>' + jump('Öffnen', 'view', 'Verbindungen') + '</div></div>';
 }
 
 export function sectionPage(section, rows, filter, loading) {
@@ -95,12 +122,14 @@ export function sectionPage(section, rows, filter, loading) {
 }
 
 const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
-export function calendarPage(rows, calendar) {
+export function calendarPage(rows, calendar, connected) {
   const day = today();
   const first = calendar.month + '-01';
   const dow = (new Date(first + 'T12:00:00Z').getUTCDay() + 6) % 7;
   const start = shiftDate(first, -dow);
-  const matches = calendarEntries(rows).filter(item => {
+  const matches = displayedAgenda(rows, connected.events).filter(item => {
+    if (item.external && calendar.source && item.external.provider !== calendar.source) return false;
+    if (!item.external && calendar.source && calendar.source !== 'local') return false;
     if (calendar.kind === 'termine') return ['Termin','Gespräch','Arztbesuch'].includes(item.kind) && item.state === 'Offen' && item.date >= day;
     if (calendar.kind === 'aufgaben') return ['Aufgabe','Frist'].includes(item.kind) && item.state === 'Offen';
     return !calendar.kind || item.kind === calendar.kind;
@@ -122,11 +151,16 @@ export function calendarPage(rows, calendar) {
     ['Mo','Di','Mi','Do','Fr','Sa','So'].map(label => '<span class="weekday">' + label + '</span>').join('') + days + '</div></section>';
   return heading('Kalender', button('Archiv', 'calendar-archive', '', 'archive') + button('Neuer Kalendereintrag', 'create', 'Kalender', 'plus', 'primary')) +
     '<div class="filters"><label class="input-wrap">Eintragsart<select data-calendar-kind>' + options(calendarKinds, calendar.kind) + '</select></label>' +
-    (calendar.selected ? button('Tagesfilter entfernen', 'day', '', 'close') : '') + '</div><div class="calendar-layout">' + month +
-    panel(calendar.selected ? showDate(calendar.selected) : 'Agenda', items.length ? items.map(item => recordRow(item.row, '', item)).join('') :
-      empty('calendar','Keine Einträge in dieser Ansicht'), items.length ? jump('Kalenderdatei', 'ics', 'agenda', 'download') : '') + '</div>';
+    '<label class="input-wrap">Quelle<select data-calendar-source>' + options([['', 'Alle Quellen'], ['local', 'LifeCase'],
+      ...Object.entries(providers).filter(([key]) => connected.accounts?.[key]?.connected).map(([key, provider]) => [key, provider.calendar])], calendar.source) + '</select></label>' +
+    (calendar.selected ? button('Tagesfilter entfernen', 'day', '', 'close') : '') +
+    (Object.values(connected.accounts ?? {}).some(account => account.connected) ? button('Kalender aktualisieren', 'external-reload', '', 'refresh') : '') +
+    '</div>' + externalStatus(connected) + '<div class="calendar-layout">' + month +
+    panel(calendar.selected ? showDate(calendar.selected) : 'Agenda', items.length ? items.map(agendaRow).join('') :
+      empty('calendar','Keine Einträge in dieser Ansicht'), items.some(item => !item.external) ? jump('LifeCase-Termine exportieren', 'ics', 'agenda', 'download') : '') + '</div>';
 }
 export function selectedCalendar(rows, calendar) {
+  if (calendar.source && calendar.source !== 'local') return [];
   return calendarEntries(rows).filter(item => {
     if (calendar.selected ? item.date !== calendar.selected : !['termine','aufgaben'].includes(calendar.kind) && !item.date.startsWith(calendar.month)) return false;
     if (calendar.kind === 'termine') return ['Termin','Gespräch','Arztbesuch'].includes(item.kind) && item.state === 'Offen' && item.date >= today();

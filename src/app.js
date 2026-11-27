@@ -1,3 +1,5 @@
+import { makeConnections } from './connections.js';
+import { connectionsView, healthView, mailboxView } from './connected-views.js';
 import { db, downloadBlob, files, get, message, records, userError } from './backend.js';
 import { calendarFile } from './calendar-file.js';
 import { bindRecordActions, closeDialog, editRecord, errorAt, openDialog, openRecord } from './editor.js';
@@ -12,7 +14,7 @@ const dialog = document.querySelector('#dialog');
 const themeMedia = matchMedia('(prefers-color-scheme: dark)');
 const readTheme = () => { try { return localStorage.getItem('lifecase-theme') || 'system'; } catch { return 'system'; } };
 const defaults = () => ({ query: '', section: '', caseId: '', personId: '', from: '', to: '', archived: false });
-const calendarDefaults = () => ({ month: today().slice(0, 7), selected: '', kind: '' });
+const calendarDefaults = () => ({ month: today().slice(0, 7), selected: '', kind: '', source: '' });
 const state = {
   session: null, verified: false, authStage: 'boot', factors: [], pendingFactor: null, email: '', epoch: 0,
   view: 'Übersicht', sectionFilter: '', rows: [], files: [], loading: false, error: '',
@@ -20,11 +22,13 @@ const state = {
   search: defaults(), export: { ...defaults(), kind: 'all' }, excluded: new Set(), includeFiles: true,
 };
 const ctx = {
+  calendar: () => state.calendar, view: () => state.view, go, render,
   rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
   notify, sync,
 };
+const connected = makeConnections(ctx);
 let noticeTimer;
 let syncVersion = 0;
 let installPrompt;
@@ -61,6 +65,7 @@ function cleared() {
   state.excluded.clear();
   state.includeFiles = true;
   state.menu = false;
+  connected.reset();
   notice.textContent = '';
   closeDialog(true);
 }
@@ -101,7 +106,7 @@ function authPage() {
 }
 function settings() {
   const themes = [['system','System','monitor'],['light','Hell','sun'],['dark','Dunkel','moon']];
-  return heading('Einstellungen') +
+  return heading('Einstellungen') + panel('Verbindungen', '<div class="panel-body settings-content"><p>Verwalte Outlook, Gmail, Kalender und Apple Health.</p><div class="actions">' + button('Verbindungen öffnen', 'view', 'Verbindungen', 'link') + '</div></div>') +
     panel('Darstellung', '<div class="panel-body settings-content"><div class="theme-choices">' +
       themes.map(([id, label, symbol]) => '<button class="button" type="button" data-theme-choice="' + id + '" aria-pressed="' + (state.theme === id) + '">' + icon(symbol, 17) + esc(label) + '</button>').join('') + '</div></div>') +
     panel('Konto und Datenschutz', '<div class="panel-body settings-content">' + publicEmail() +
@@ -112,8 +117,13 @@ function settings() {
       '<p>Fällige Erinnerungen siehst du in LifeCase. Für Hinweise bei geschlossener App kannst du eine Kalenderdatei mit Erinnerungen in deinen Gerätekalender importieren.</p></div>');
 }
 function mainView() {
-  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading);
-  if (state.view === 'Kalender') return state.sectionFilter === 'archiv' ? sectionPage('Kalender', state.rows, 'archiv', state.loading) : calendarPage(state.rows, state.calendar);
+  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state);
+  if (state.view === 'Posteingang') return mailboxView(connected.state);
+  if (state.view === 'Verbindungen') return connectionsView(connected.state);
+  if (state.view === 'Gesundheitsdaten') return healthView(connected.state);
+  if (state.view === 'Gesundheit') return sectionPage('Gesundheit', state.rows, state.sectionFilter, state.loading) +
+    '<div class="dash-secondary">' + panel('Apple Health', '<div class="panel-body actions">' + button('Gesundheitsdaten ansehen', 'view', 'Gesundheitsdaten', 'activity') + '</div>') + '</div>';
+  if (state.view === 'Kalender') return state.sectionFilter === 'archiv' ? sectionPage('Kalender', state.rows, 'archiv', state.loading) : calendarPage(state.rows, state.calendar, connected.state);
   if (state.view === 'Suche') return heading('Suche') + searchControls(state.rows, state.search) + '<div id="search-results">' + searchResults(state.rows, state.files, state.search) + '</div>';
   if (state.view === 'PDF-Export') return heading('PDF-Export') + exportControls(state.rows, state.export) + '<div id="export-list">' + exportList(state.rows, state.export, state.excluded, state.includeFiles) + '</div>';
   if (state.view === 'Einstellungen') return settings();
@@ -135,6 +145,7 @@ function go(view, filter = '', focus = true) {
   closeDialog();
   render();
   window.scrollTo(0, 0);
+  connected.activate();
   if (focus) document.querySelector(view === 'Suche' ? '#search-query' : '#main')?.focus({ preventScroll: true });
 }
 async function sync(showNotice = false) {
@@ -156,7 +167,7 @@ async function sync(showNotice = false) {
   } finally {
     if (epoch === state.epoch && revision === syncVersion) {
       state.loading = false;
-      if (!['Suche', 'PDF-Export'].includes(state.view) || showNotice) render();
+      if (!['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen'].includes(state.view) || showNotice) render();
       else refreshResults();
     }
   }
@@ -190,6 +201,8 @@ async function acceptSession(session) {
   if (state.verified) {
     state.loading = true;
     render();
+    connected.activate();
+    connected.consumeReturn();
     await sync();
   }
 }
@@ -271,6 +284,15 @@ function handleFilter(event) {
     render();
     app.querySelector('[data-calendar-kind]')?.focus();
   }
+  if (target.matches('[data-calendar-source]') && event.type === 'change') {
+    state.calendar.source = target.value;
+    render();
+    app.querySelector('[data-calendar-source]')?.focus();
+  }
+  if (target.matches('[data-health-range]') && event.type === 'change') {
+    connected.range(target);
+    app.querySelector('[data-health-range]')?.focus();
+  }
   if (target.matches('[data-export-row]')) {
     if (target.checked) state.excluded.delete(target.dataset.exportRow);
     else state.excluded.add(target.dataset.exportRow);
@@ -345,10 +367,11 @@ document.addEventListener('click', async event => {
   if ('signout' in action) { await signOut(); return; }
   if ('retryAuth' in action) { await acceptSession(state.session); return; }
   if (!state.verified) return;
+  if (connected.click(action)) return;
   if ('close' in action) closeDialog();
   else if ('view' in action) go(action.view);
   else if ('metric' in action) go(...action.metric.split('|'));
-  else if ('reload' in action) await sync(true);
+  else if ('reload' in action) { connected.activate(); if (['Übersicht', 'Kalender'].includes(state.view)) connected.agenda(true); await sync(true); }
   else if ('menu' in action) {
     state.menu = !state.menu;
     render();
@@ -363,12 +386,14 @@ document.addEventListener('click', async event => {
     state.calendar.selected = action.day;
     if (action.day) state.calendar.month = action.day.slice(0, 7);
     render();
+    connected.agenda();
     if (action.day) app.querySelector('.day[data-day="' + action.day + '"]')?.focus();
   } else if ('month' in action) {
     const [year, month] = state.calendar.month.split('-').map(Number);
     state.calendar.month = new Date(Date.UTC(year, month - 1 + Number(action.month), 1)).toISOString().slice(0, 7);
     state.calendar.selected = '';
     render();
+    connected.agenda();
     app.querySelector('[data-month="' + action.month + '"]')?.focus();
   } else if ('ics' in action) ics(action.ics);
   else if ('recordPdf' in action) pdfItem(action.recordPdf);
@@ -395,6 +420,10 @@ app.addEventListener('input', handleFilter);
 app.addEventListener('change', handleFilter);
 app.addEventListener('submit', event => {
   if (event.target.matches('#search-form,#export-form')) event.preventDefault();
+  if (event.target.matches('#mail-search')) {
+    event.preventDefault();
+    connected.search(event.target);
+  }
 });
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && state.menu) {
