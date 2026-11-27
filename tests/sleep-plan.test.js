@@ -138,3 +138,12 @@ test('midnight keeps an explicitly different day separate from the open sleep qu
   assert.equal(sleepMorningCanBeSaved(nextDay, afterMidnight), true);
   assert.equal(sleepMorningCanBeSaved({ ...morning, wake: '00:15' }, afterMidnight), false);
 });
+
+test('the screenshot message still saves the requested weekday during a temporary AI outage', () => {
+  const current = new Date('2026-11-27T23:52:00Z');
+  const answer = readSleepReply('am sonntag kann ich auch ausschlafen, dass du das weisst', '2026-11-28', current);
+  assert.deepEqual(answer, { date: '2026-11-29', wake: '' });
+  assert.equal(sleepMorningCanBeSaved(answer, current), true);
+  assert.equal(sleepMorningCanBeSaved({ date: '2026-11-31', wake: '' }, current), false);
+  assert.equal(sleepMorningCanBeSaved({ date: '2027-01-10', wake: '' }, current), false);
+});

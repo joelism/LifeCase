@@ -8,6 +8,8 @@ const planKey = 'lifecase_sleep_plan';
 const morningKey = 'lifecase_sleep_morning';
 const datedMorningKey = day => morningKey + '_' + day;
 const validTime = value => typeof value === 'string' && timePattern.test(value);
+const weekdays = ['sonntag', 'montag', 'dienstag', 'mittwoch', 'donnerstag', 'freitag', 'samstag'];
+const sleepDayWords = /\b(?:(?:am )?(?:montag|dienstag|mittwoch|donnerstag|freitag|samstag|sonntag)|heute(?: morgen)?|morgen)\b/g;
 export const sleepDefaults = Object.freeze({ enabled: true, wake: '', goal: 480, lead: 60,
   earliestBed: '23:00', latestBed: '02:00' });
 
@@ -45,18 +47,28 @@ export function sleepMorningUpdate(answer, user, now = new Date()) {
 }
 
 export function readSleepReply(text, questionDay = '', now = new Date()) {
-  const reply = text.toLocaleLowerCase('de-CH').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ').replace(/^doch /, '');
-  const days = reply.match(/\b(?:heute(?: morgen)?|morgen)\b/g) ?? [];
+  const reply = text.toLocaleLowerCase('de-CH').trim().replace(/[.!]+$/, '').replace(/\s+/g, ' ')
+    .replace(/^doch /, '').replace(/, (?:dass du das weisst|nur damit du es weisst)$/, '');
+  const days = reply.match(sleepDayWords) ?? [];
   if (days.length > 1) return null;
   const day = days[0];
-  const date = day === 'morgen' ? shiftDate(today(now), 1) : day ? today(now) : questionDay || sleepMorningDate(now);
-  const words = day ? reply.replace(/\b(?:heute(?: morgen)?|morgen)\b/, '').replace(/\s+/g, ' ').trim() : reply;
+  const current = today(now);
+  const upcoming = sleepMorningDate(now);
+  let date = questionDay || upcoming;
+  if (day === 'morgen') date = shiftDate(current, 1);
+  else if (day?.startsWith('heute')) date = current;
+  else if (day) {
+    const weekday = weekdays.indexOf(day.replace(/^am /, ''));
+    const anchor = new Date(upcoming + 'T12:00:00Z').getUTCDay();
+    date = shiftDate(upcoming, (weekday + 7 - anchor) % 7);
+  }
+  const words = day ? reply.replace(day, '').replace(/\s+/g, ' ').trim() : reply;
   const time = words.match(/^(?:(?:(?:ich )?stehe?|stehe? ich|(?:ich )?(?:möchte|muss|will)|(?:möchte|muss|will) ich) )?(?:(?:erst|schon) )?(?:um )?([01]?\d|2[0-3])(?:[:.]([0-5]\d))?(?: uhr)?(?: (auf|aufstehen))?$/);
   if (time && (questionDay || time[3] || /\bstehe?\b/.test(words))) {
     return { date, wake: time[1].padStart(2, '0') + ':' + (time[2] || '00') };
   }
   const free = /^(?:(?:(?:ich )?hab(?:e)? frei|hab(?:e)? ich frei)(?: und kann ausschlafen)?|frei|keine feste (?:aufsteh)?zeit|ohne wecker)$/;
-  const sleepIn = /^(?:ausschlafen|(?:ich )?schlafe? aus|schlafe? ich aus|(?:ich )?(?:kann|möchte|will) ausschlafen|(?:kann|möchte|will) ich ausschlafen)$/;
+  const sleepIn = /^(?:ausschlafen|(?:ich )?schlafe? (?:auch )?aus|schlafe? ich (?:auch )?aus|(?:ich )?(?:kann|möchte|will) (?:auch )?ausschlafen|(?:kann|möchte|will) ich (?:auch )?ausschlafen)$/;
   if (sleepIn.test(words) || ((day || questionDay) && free.test(words))) return { date, wake: '' };
   return null;
 }
@@ -77,7 +89,9 @@ function localTime(day, time) {
 
 export function sleepMorningCanBeSaved({ date, wake }, now = new Date()) {
   const day = today(now);
-  return (date === day || date === shiftDate(day, 1)) &&
+  return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    date >= day && date <= shiftDate(day, 31) && Number.isFinite(Date.parse(date)) &&
+    new Date(date).toISOString().slice(0, 10) === date &&
     (wake === '' || (validTime(wake) && localTime(date, wake) > now.getTime()));
 }
 

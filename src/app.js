@@ -187,7 +187,7 @@ async function saveSleepMorning(answer, epoch) {
   if (!state.verified || epoch !== state.epoch) return;
   const now = new Date();
   if (!sleepMorningCanBeSaved(answer, now)) {
-    throw userError('Diese Zeit ist schon vorbei oder liegt ausserhalb von heute und morgen. Wann möchtest du aufstehen?');
+    throw userError('Gib eine Aufstehzeit in der Zukunft für einen Morgen innerhalb der nächsten 31 Tage an.');
   }
   const result = get(await db.auth.updateUser({ data: sleepMorningUpdate(answer, state.session?.user, now) }));
   if (epoch !== state.epoch) return;

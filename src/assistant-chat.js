@@ -37,18 +37,18 @@ export function makeAssistant(ctx, currentAccounts) {
   let lastDate = '';
   let pendingMessage = '';
   let aiAvailable = null;
-  let aiHistory = [];
   let pendingCase = null;
   let lastChronicleId = '';
   let pendingAppointment = null;
   let sleepEditingDay = '';
   const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; sleepEditingDay = ''; }
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; sleepEditingDay = ''; }
 
   function openSleepQuestion() {
     const sleep = ctx.sleepCheckIn();
-    if (!sleep || (sleep.plan.status !== 'question' && sleep.plan.morning !== sleepEditingDay)) return null;
-    return sleep;
+    if (!sleep) return null;
+    if (sleep.plan.morning === sleepEditingDay) return sleep;
+    return sleep.plan.status === 'question' && !proposal && !pendingAppointment && !pendingCase && !draft ? sleep : null;
   }
   function sleepMessage({ plan }) {
     return [sleepQuestion(plan, ctx.name()), sleepCalendarNote(plan)].filter(Boolean).join(' ');
@@ -69,11 +69,11 @@ export function makeAssistant(ctx, currentAccounts) {
     const { date, wake } = answer;
     if (question?.plan.morning === date) {
       sleepEditingDay = '';
-      add('assistant', sleepMessage(question));
+      if (text) add('assistant', sleepMessage(question));
     }
-    add('user', text);
+    if (text) add('user', text);
     add('assistant', wake ? 'Für den ' + showDate(date) + ' ist ' + wake + ' Uhr als Aufstehzeit gespeichert.' :
-      'Für den ' + showDate(date) + ' lasse ich deine Aufstehzeit offen.');
+      'Gespeichert. Am ' + showDate(date) + ' kannst du ausschlafen.');
   }
 
   async function agendaFor(date, strict = false) {
@@ -257,17 +257,26 @@ export function makeAssistant(ctx, currentAccounts) {
       'unter «Aufgaben ohne Datum» in «Meine Woche».') + (dossier ? '\nDossier «' + nameOf(dossier) + '».' : ''), saved.id);
     draft = null;
   }
-  async function useOpenAI(text, epoch) {
+  async function useOpenAI(epoch, question, fallback) {
     const draft = pendingAppointment?.original;
     const context = draft ? [{ role: 'assistant', content: ('Offener Entwurf (noch nicht gespeichert): ' +
       [draft.title, draft.date, draft.time, draft.appointmentProvider, draft.location, draft.appointmentGoal, draft.appointmentExpected]
         .filter(Boolean).join(' · ')).slice(0, 600) }] : [];
-    const userMessage = { role: 'user', content: text };
-    const history = [...aiHistory, userMessage].slice(-7);
-    const messages = [...aiHistory, ...context, userMessage].slice(-8);
-    const result = await connection('assistant', { messages, lastDate });
+    const transcript = history.map(row => ({ role: row.side, content: row.text.slice(0, 600) }));
+    const messages = [...transcript.slice(0, -1), ...context, transcript.at(-1)].slice(-8);
+    let result;
+    try {
+      result = await connection('assistant', { messages, lastDate, intentVersion: 2, sleepDate: question?.plan.morning });
+    } catch (error) {
+      if (epoch !== ctx.epoch()) return;
+      if (fallback) return recordSleepReply(fallback, '', epoch, question);
+      throw error;
+    }
     if (epoch !== ctx.epoch()) return;
-    aiHistory = history;
+    if (fallback || result.action === 'sleep') {
+      const answer = fallback ?? { date: result.date, wake: result.time };
+      return recordSleepReply(answer, '', epoch, question);
+    }
     if (result.action === 'chronicle' || result.action === 'case_overview' ||
         (result.caseQuery && ['appointment', 'task'].includes(result.action))) return resolveDossier(result, epoch);
     if (result.action === 'appointment') return beginAppointment(result.fields, epoch);
@@ -275,7 +284,6 @@ export function makeAssistant(ctx, currentAccounts) {
     if (result.action === 'lunch') return suggestLunch(result, epoch);
     if (result.action === 'agenda') return showAgenda(result.date, epoch);
     if (result.action !== 'answer' && result.action !== 'clarify') throw userError('Die Antwort von OpenAI war nicht vollständig.');
-    aiHistory = [...aiHistory, { role: 'assistant', content: result.reply.slice(0, 600) }];
     add('assistant', result.reply);
   }
   async function resolveDossier(intent, epoch) {
@@ -367,6 +375,7 @@ export function makeAssistant(ctx, currentAccounts) {
       '<div class="actions">' + button('Ja, bitte','lunch-confirm','','check','primary') +
         button('Andere Zeit','lunch-other','','clock') + button('Nein','lunch-cancel') + '</div></div>';
     const status = aiAvailable === null ? 'OpenAI-Verbindung wird geprüft …' :
+      aiAvailable === 'unreachable' ? 'LifeCase versucht die KI-Verbindung beim Senden erneut.' :
       aiAvailable ? 'LifeCase verwendet OpenAI, um Chatnachrichten zu verstehen.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
     const caseControls = !busy && pendingCase ? '<div class="assistant-tools" aria-label="Dossier auswählen">' +
       pendingCase.choices.slice(0, 8).map(row => button(pendingCase.review ? 'In «' + nameOf(row) + '» speichern' : nameOf(row),
@@ -463,7 +472,6 @@ export function makeAssistant(ctx, currentAccounts) {
       if (control?.hasAttribute('data-care-review')) { reviewAppointment(); return; }
       if (control?.hasAttribute('data-care-discard')) {
         pendingAppointment = null;
-        aiHistory = [];
         add('assistant', 'Entwurf verworfen.');
         draw();
         return;
@@ -478,12 +486,11 @@ export function makeAssistant(ctx, currentAccounts) {
       if (busy) return;
       const text = field.value.trim();
       if (!text) return;
-      const question = proposal || pendingCase || pendingAppointment || draft ? null : shownSleep;
+      const question = shownSleep;
       const answer = readSleepReply(text, question?.plan.morning);
       if (!answer && aiAvailable === null) return;
       field.value = '';
       pendingMessage = '';
-      if (answer) return run(epoch => recordSleepReply(answer, text, epoch, question), text);
       add('user', text);
       if (proposal && isYes(text)) return run(blockLunch);
       if (proposal && isNo(text)) return cancel();
@@ -496,8 +503,9 @@ export function makeAssistant(ctx, currentAccounts) {
           pendingCase.choices.find(row => row.id === pendingCase.preferred) : findAssistantDossier(pendingCase.choices, text).match);
         if (picked) return run(epoch => chooseDossier(picked.id, epoch));
         pendingCase = null;
-        return run(epoch => useOpenAI(text, epoch), text);
+        return run(epoch => useOpenAI(epoch, question, answer), text);
       }
+      if (answer) return run(epoch => recordSleepReply(answer, '', epoch, question), text);
       const task = interpretTask(text);
       const request = lunchRequest(text);
       if (task) return run(epoch => addTask(task, epoch));
@@ -505,10 +513,10 @@ export function makeAssistant(ctx, currentAccounts) {
       run(epoch => addAppointment(text, epoch));
     });
     draw();
-    if (aiAvailable === null) {
+    if (aiAvailable !== true) {
       const epoch = ctx.epoch();
       connection('assistant-status').then(result => { if (epoch === ctx.epoch()) aiAvailable = result.available === true; })
-        .catch(() => { if (epoch === ctx.epoch()) aiAvailable = false; })
+        .catch(() => { if (epoch === ctx.epoch()) aiAvailable = 'unreachable'; })
         .finally(() => { if (epoch === ctx.epoch() && form.isConnected) draw(); });
     }
     if (autoLunch && !proposal) run(find);

@@ -175,3 +175,54 @@ test('a malformed model answer preserves a matching follow-up for approval', asy
   assert.equal(result.review, true);
   assert.equal(result.fields.notes, content);
 });
+
+test('the GPT schema accepts the screenshot message as a new sleep plan after a previous dossier', async () => {
+  const content = 'am sonntag kann ich auch ausschlafen, dass du das weisst';
+  const current = new Date('2026-11-27T23:52:00Z');
+  const transcript = [
+    { role: 'user', content: 'Bitte speichere den Nachtrag im Dossier Testbetrieb.' },
+    { role: 'assistant', content: 'Die Notiz ist im Dossier Testbetrieb gespeichert.' },
+    { role: 'assistant', content: 'Gespeichert. Am 28.11.2026 kannst du ausschlafen.' },
+    { role: 'user', content },
+  ];
+  const values = { messages: transcript, intentVersion: 2, sleepDate: '2026-11-28' };
+  const sunday = { ...blank, action: 'sleep', date: '2026-11-29', sourceQuote: content };
+  const result = await askAssistant({ apiKey: 'synthetic-key', values, now: current, transport: async (_url, request) => {
+    const body = JSON.parse(request.body);
+    assert(body.text.format.schema.properties.action.enum.includes('sleep'));
+    assert.match(body.instructions, /Offene Schlaf-Rückfrage für: 2026-11-28/);
+    assert.deepEqual(body.input, transcript);
+    return completed(JSON.stringify(sunday));
+  } });
+  assert.deepEqual(result, { action: 'sleep', date: '2026-11-29', time: '' });
+  assert.equal(assistantIntent({ ...sunday, time: '09:00' }, current, transcript, true).action, 'clarify');
+  for (const action of ['chronicle', 'case_overview', 'task', 'appointment']) {
+    assert.equal(assistantIntent({ ...sunday, action, caseQuery: 'Testbetrieb' }, current, transcript, true).action, 'clarify');
+  }
+  assert.throws(() => assistantIntent(sunday, current, transcript), { status: 422 });
+});
+
+test('AI can normalize spoken time but cannot save a fabricated quote or a question as intent', () => {
+  const text = 'Am Mittwoch muss ich erst um halb neun raus';
+  const action = { ...blank, action: 'sleep', date: '2026-12-02', time: '08:30', sourceQuote: text };
+  const transcript = [{ role: 'user', content: text }];
+  assert.deepEqual(assistantIntent(action, now, transcript, true), { action: 'sleep', date: '2026-12-02', time: '08:30' });
+  assert.equal(assistantIntent({ ...action, sourceQuote: '08:30' }, now, transcript, true).action, 'clarify');
+  const question = 'Kann ich am Mittwoch ausschlafen?';
+  assert.equal(assistantIntent({ ...action, time: '', sourceQuote: question }, now, [{ role: 'user', content: question }], true).action, 'clarify');
+});
+
+test('a new appointment does not inherit a previous dossier; an explicit chronicle request can still refer to the prior note', () => {
+  const note = 'Heute fiel die Abholung im Testbetrieb zum zweiten Mal aus.';
+  const content = 'Speichere das bitte im Dossier Testbetrieb.';
+  const prior = [{ role: 'user', content: note }, { role: 'assistant', content: 'Möchtest du das festhalten?' }];
+  const appointment = { ...sample, caseQuery: 'Testbetrieb' };
+  const fresh = [...prior, { role: 'user', content: 'Am Montag habe ich bei der Psychologin um 16 Uhr einen Termin.' }];
+  assert.equal(assistantIntent(appointment, now, fresh, true).caseQuery, undefined);
+  const quoted = { ...blank, action: 'chronicle', caseQuery: 'Testbetrieb', title: 'Ausfall der Abholung', sourceQuote: note, knowledge: 'observed' };
+  const intent = assistantIntent(quoted, now, [...prior, { role: 'user', content }], true);
+  assert.equal(intent.fields.notes, note);
+  assert.equal(intent.caseQuery, 'Testbetrieb');
+  const followUp = 'dazu kommt dass die Abholung auch am Donnerstag nicht geklappt hat.';
+  assert.equal(assistantIntent(quoted, now, [...prior, { role: 'user', content: followUp }], true).fields.notes, followUp);
+});

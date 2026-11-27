@@ -131,7 +131,7 @@ async function askStudio(req, config, values) {
         'X-LifeCase-Session': req.headers.get('authorization').slice(7),
       },
       body: JSON.stringify(values.action === 'assistant-briefing' ? { briefing: values.briefing } :
-        { messages: values.messages, lastDate: values.lastDate }),
+        { messages: values.messages, lastDate: values.lastDate, intentVersion: values.intentVersion, sleepDate: values.sleepDate }),
     });
   } catch {
     throw new Failure(503, 'Die Verbindung zum OpenAI-Assistenten ist gerade unterbrochen.');
