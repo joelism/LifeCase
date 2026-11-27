@@ -50,3 +50,10 @@ Das Projekt [LifeCaseHealth.xcodeproj](ios/LifeCaseHealth.xcodeproj) in Xcode ö
 ### GitHub Pages
 
 Die bestehende Veröffentlichung verwendet das Stammverzeichnis von `main`. Nach Änderungen mit `npm run build:pages` die statischen Dateien im Stammverzeichnis neu erzeugen und mit den Änderungen committen. `web/index.html` ist die HTML-Quelle. Der Build für die private Site liegt weiterhin in `dist/`. Die GitHub-Version speichert ihre Anmeldung nur im Arbeitsspeicher des Tabs, weil mehrere GitHub-Projektseiten dieselbe Browser-Origin teilen.
+
+## LifeCase 2.1
+
+- **Einkaufen** speichert mehrere Einkaufslisten mit Mengen und abhaktbarem Zustand im LifeCase-Konto.
+- **Scannen** liest Fotos im Browser. Die Texterkennung lädt ihre OCR-Komponenten bei Bedarf. Originalbilder werden beim Speichern optional in den privaten Dokumentenspeicher übertragen. Bei Teamplänen wird die angegebene Namenszeile mit den Datumsüberschriften abgeglichen. Prüfe die Vorschau, bevor du Schichten übernimmst.
+- **Terminprüfung** verwendet einen integrierten Textklassifikator und prüft Datumsangaben im Originaltext. Sie verarbeitet seit der Aktivierung eingegangene Nachrichten in verbundenen Konten. Eindeutige Termine können direkt übernommen werden. Unverbindliche Angaben, Terminänderungen und Fälle mit mehreren Möglichkeiten erscheinen als Vorschläge. Diese Einstellung wird nach der Kontoverbindung in LifeCase aktiviert.
+- Die Mailprüfung läuft um 08:00, 14:00 und 20:00 Uhr in der Zeitzone Europe/Zurich. Die Edge Function empfängt geplante Aufrufe über einen gesonderten, in Vault verwalteten Schlüssel. Für die Auswertung der Nachrichten ist kein externer KI-Dienst erforderlich.

@@ -50,7 +50,7 @@ export const sections = {
   'Kalender': {
     icon: 'calendar', noun: 'Kalendereintrag', create: 'Neuer Kalendereintrag', empty: 'Noch keine Kalendereinträge',
     description: 'Termine, Aufgaben, Fristen und Erinnerungen an einem Ort.',
-    fields: [title(), select('kind', 'Art', ['Termin', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Chronik', 'Gesundheit', 'Beweismittel'])],
+    fields: [title(), select('kind', 'Art', ['Termin', 'Schicht', 'Aufgabe', 'Frist', 'Erinnerung']), select('status', 'Status', ['Offen', 'Erledigt', 'Abgesagt']), date('date', 'Datum', true), time, field('endTime', 'Bis', 'time'), date('endDate', 'Enddatum (optional)'), location, reminder, notes('notes', 'Notizen'), cases, people, related('Verknüpfte Einträge und Beweismittel', ['Gespräche', 'Arztzeugnisse', 'Chronik', 'Gesundheit', 'Beweismittel'])],
   },
   'Beweismittel': {
     icon: 'shield', noun: 'Beweismittel', create: 'Neues Beweismittel', empty: 'Noch keine Beweismittel',
@@ -62,6 +62,9 @@ export const sections = {
     description: 'Ansprechpartner und ihre Verbindungen zu deinen Fällen.',
     fields: [title('Vor- und Nachname'), field('role', 'Funktion'), field('organisation', 'Organisation'), field('email', 'E-Mail-Adresse', 'email'), field('phone', 'Telefon', 'tel'), field('address', 'Adresse'), notes('notes', 'Notizen'), cases],
   },
+  'Einkaufen': { icon: 'cart', noun: 'Einkaufsliste', description: 'Einkaufslisten erstellen und Artikel beim Einkaufen abhaken.', fields: [title('Name der Liste')] },
+  'Scannen': { icon: 'camera', description: 'Fotos und Arbeitspläne in Termine oder Schichten umwandeln.' },
+  'Terminprüfung': { icon: 'mail', description: 'E-Mail-Termine automatisch erfassen und Vorschläge prüfen.' },
   'Gesundheitsdaten': { icon: 'activity', description: 'Tageswerte aus Apple Health und ihr Verlauf.' },
   'Posteingang': { icon: 'mail', description: 'Wichtige E-Mails und Anhänge in deinen Dossiers ablegen.' },
   'Verbindungen': { icon: 'link', description: 'Konten und Datenquellen für LifeCase verwalten.' },
@@ -134,7 +137,7 @@ export function searchRecords(records, files, query, filters = {}) {
     if (!terms.length) return true;
     const fields = Object.entries(row.fields)
       .filter(([key]) => !['caseIds', 'personIds', 'documentIds', 'relatedIds', 'Dateipfad'].includes(key))
-      .map(([, item]) => item);
+      .map(([key, item]) => key === 'items' && Array.isArray(item) ? item.map(entry => [entry.name, entry.quantity]).flat() : item);
     const text = normalized([row.section, ...fields, ...linksOf(row).map(id => byId.has(id) ? nameOf(byId.get(id)) : ''), ...(fileNames.get(row.id) ?? [])].join(' '));
     return terms.every(term => text.includes(term));
   });
@@ -145,7 +148,7 @@ export function calendarEntries(records) {
     const kind = value(row, 'kind') || 'Termin';
     const state = value(row, 'status') || 'Offen';
     if (section === 'Kalender' && value(row, 'date')) {
-      return [{ row, date: value(row, 'date'), time: value(row, 'time'), kind, state, reminderDays: value(row, 'reminderDays') }];
+      return [{ row, date: value(row, 'date'), time: value(row, 'time'), endTime: value(row, 'endTime'), kind, state, reminderDays: value(row, 'reminderDays') }];
     }
     if (section === 'Arztzeugnisse' && value(row, 'validUntil')) {
       return [{ row, date: value(row, 'validUntil'), time: '', kind: 'Arztzeugnis', state: 'Offen', reminderDays: value(row, 'reminderDays') }];

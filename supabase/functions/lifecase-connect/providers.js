@@ -141,15 +141,15 @@ async function googleBody(row, access) {
   const body = decoder.decode(decode(bytes));
   return chosen.mimeType === 'text/html' ? textOnly(body) : body;
 }
-export async function messageDetail(provider, access, id) {
+export async function messageDetail(provider, access, id, includeAttachments = true) {
   if (provider === 'google') {
     const row = await getJson(withQuery(gmail + 'messages/' + identity(id), { format: 'full' }), access);
-    return { ...googleMessage(row), text: (await googleBody(row, access)).slice(0, 24000), attachments: mimeParts(row.payload)
+    return { ...googleMessage(row), text: (await googleBody(row, access)).slice(0, 24000), attachments: (includeAttachments ? mimeParts(row.payload) : [])
       .flatMap((part, index) => part.filename ? [{ id: gmailFileId(part, index), name: part.filename, size: Number(part.body?.size ?? 0) }] : []) };
   }
   const base = graph + 'me/messages/' + identity(id);
   const row = await getGraph(withQuery(base, { $select: msFields + ',body' }), access, { Prefer: 'IdType="ImmutableId", outlook.body-content-type="text"' });
-  const attachments = row.hasAttachments ? await getGraph(withQuery(base + '/attachments', { $select: 'id,name,size,isInline', $top: 80 }), access) : null;
+  const attachments = row.hasAttachments && includeAttachments ? await getGraph(withQuery(base + '/attachments', { $select: 'id,name,size,isInline', $top: 80 }), access) : null;
   return { ...microsoftMessage(row), text: (row.body?.contentType === 'html' ? textOnly(row.body.content) : (row.body?.content || '')).slice(0, 24000),
     attachments: (attachments?.value ?? []).filter(item => item['@odata.type'] !== '#microsoft.graph.referenceAttachment')
       .map(item => ({ id: item.id, name: item.name || 'Anhang', size: Number(item.size ?? 0) })) };
@@ -265,3 +265,17 @@ export async function listCalendar(provider, access, from, through) {
   return all;
 }
 export const swissDay = timeZoneDay;
+
+export async function listIncomingMail(provider, access, since, limit) {
+  if (provider === 'google') {
+    const data = await getJson(withQuery(gmail + 'messages', {
+      labelIds: 'INBOX', q: 'after:' + Math.floor(since.getTime() / 1000), maxResults: limit,
+      fields: 'messages(id),nextPageToken',
+    }), access);
+    return (data.messages ?? []).map(row => ({ id: row.id }));
+  }
+  const data = await getGraph(withQuery(graph + 'me/mailFolders/inbox/messages', {
+    $top: limit, $select: 'id,receivedDateTime', $filter: 'receivedDateTime ge ' + since.toISOString(), $orderby: 'receivedDateTime asc',
+  }), access);
+  return (data.value ?? []).map(row => ({ id: row.id, date: row.receivedDateTime }));
+}

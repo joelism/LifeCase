@@ -43,7 +43,7 @@ export function makeConnections(ctx) {
     if (state.statusLoading || (!force && Date.now() - lastStatus < 120000)) return;
     const epoch = ctx.epoch();
     state.statusLoading = true;
-    update(['Verbindungen', 'Posteingang']);
+    update(['Verbindungen', 'Posteingang', 'Terminprüfung']);
     try {
       const result = await connection('status');
       if (epoch !== ctx.epoch()) return;
@@ -56,7 +56,7 @@ export function makeConnections(ctx) {
     } finally {
       if (epoch === ctx.epoch()) {
         state.statusLoading = false;
-        update(['Verbindungen', 'Posteingang']);
+        update(['Verbindungen', 'Posteingang', 'Terminprüfung']);
         if (ctx.view() === 'Posteingang') ensureMail();
         if (['Übersicht', 'Kalender'].includes(ctx.view())) agenda();
       }
@@ -155,7 +155,7 @@ export function makeConnections(ctx) {
   function activate() {
     const view = ctx.view();
     if (view === 'Gesundheitsdaten') return loadHealth(true);
-    if (!['Übersicht', 'Kalender', 'Verbindungen', 'Posteingang'].includes(view)) return;
+    if (!['Übersicht', 'Kalender', 'Verbindungen', 'Posteingang', 'Terminprüfung'].includes(view)) return;
     status();
     if (view === 'Posteingang') ensureMail();
     if (view === 'Übersicht' || view === 'Kalender') agenda();

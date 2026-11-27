@@ -66,7 +66,7 @@ function readFields(form, info, row) {
   }
   if (fields.validFrom && fields.validUntil < fields.validFrom) throw userError('«Gültig bis» muss auf oder nach «Gültig ab» liegen.');
   if (fields.date && fields.endDate && fields.endDate < fields.date) throw userError('Das Ende muss auf oder nach dem Beginn liegen.');
-  if (fields.endTime && (!fields.time || fields.endTime <= fields.time)) throw userError('Gib eine Uhrzeit und eine spätere Endzeit an.');
+  if (fields.endTime && (!fields.time || ((!fields.endDate || fields.endDate === fields.date) && fields.endTime <= fields.time))) throw userError('Gib eine Uhrzeit und eine spätere Endzeit an.');
   return fields;
 }
 async function task(control, callback, onError = error => errorAt(dialog, error)) {

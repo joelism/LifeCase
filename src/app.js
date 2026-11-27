@@ -1,3 +1,5 @@
+import { makeDaily } from './daily.js';
+import { everydayActions, mailReview, scanPage, shoppingPage } from './daily-views.js';
 import { makeConnections } from './connections.js';
 import { connectionsView, healthView, mailboxView } from './connected-views.js';
 import { db, downloadBlob, files, get, message, records, userError } from './backend.js';
@@ -22,13 +24,14 @@ const state = {
   search: defaults(), export: { ...defaults(), kind: 'all' }, excluded: new Set(), includeFiles: true,
 };
 const ctx = {
-  calendar: () => state.calendar, view: () => state.view, go, render,
+  calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
   rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
   notify, sync,
 };
 const connected = makeConnections(ctx);
+const daily = makeDaily(ctx, () => connected.state.accounts);
 let noticeTimer;
 let syncVersion = 0;
 let installPrompt;
@@ -66,6 +69,7 @@ function cleared() {
   state.includeFiles = true;
   state.menu = false;
   connected.reset();
+  daily.reset();
   notice.textContent = '';
   closeDialog(true);
 }
@@ -117,7 +121,10 @@ function settings() {
       '<p>Fällige Erinnerungen siehst du in LifeCase. Für Hinweise bei geschlossener App kannst du eine Kalenderdatei mit Erinnerungen in deinen Gerätekalender importieren.</p></div>');
 }
 function mainView() {
-  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state);
+  if (state.view === 'Übersicht') return dashboard(state.rows, state.loading, connected.state, everydayActions(state.rows, daily.state));
+  if (state.view === 'Einkaufen') return shoppingPage(state.rows, daily.state);
+  if (state.view === 'Scannen') return scanPage(state.rows);
+  if (state.view === 'Terminprüfung') return mailReview(daily.state, connected.state.accounts);
   if (state.view === 'Posteingang') return mailboxView(connected.state);
   if (state.view === 'Verbindungen') return connectionsView(connected.state);
   if (state.view === 'Gesundheitsdaten') return healthView(connected.state);
@@ -146,11 +153,20 @@ function go(view, filter = '', focus = true) {
   render();
   window.scrollTo(0, 0);
   connected.activate();
+  if (view === 'Terminprüfung') daily.load(true);
   if (focus) document.querySelector(view === 'Suche' ? '#search-query' : '#main')?.focus({ preventScroll: true });
+}
+function showCalendarDate(date, filter = '') {
+  state.calendar.month = date.slice(0, 7);
+  state.calendar.source = '';
+  go('Kalender', filter);
+  state.calendar.selected = date;
+  render();
 }
 async function sync(showNotice = false) {
   if (!state.verified) return;
   const epoch = state.epoch;
+  daily.load(showNotice);
   const revision = ++syncVersion;
   state.loading = true;
   try {
@@ -167,7 +183,8 @@ async function sync(showNotice = false) {
   } finally {
     if (epoch === state.epoch && revision === syncVersion) {
       state.loading = false;
-      if (!['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen'].includes(state.view) || showNotice) render();
+      const shoppingDraft = state.view === 'Einkaufen' && app.querySelector('#shop-add-form input[name="name"]')?.value;
+      if ((!shoppingDraft && !['Suche', 'PDF-Export', 'Posteingang', 'Gesundheitsdaten', 'Verbindungen', 'Terminprüfung'].includes(state.view)) || showNotice) render();
       else refreshResults();
     }
   }
@@ -354,7 +371,7 @@ function ics(id) {
       event.preventDefault();
       const detail = event.target.elements.privateDetail.checked;
       const prepared = items.map(item => ({ ...item, title: detail ? nameOf(item.row) : 'LifeCase · ' + item.kind,
-        endTime: value(item.row, 'endTime'), location: value(item.row, 'location'), description: value(item.row, 'notes'), privateDetail: detail }));
+        endTime: value(item.row, 'endTime'), endDate: value(item.row, 'endDate'), location: value(item.row, 'location'), description: value(item.row, 'notes'), privateDetail: detail }));
       downloadBlob(new Blob([calendarFile(prepared)], { type: 'text/calendar;charset=utf-8' }), 'LifeCase_' + today() + '.ics');
       closeDialog();
       notify('Kalenderdatei erstellt.');
@@ -367,7 +384,7 @@ document.addEventListener('click', async event => {
   if ('signout' in action) { await signOut(); return; }
   if ('retryAuth' in action) { await acceptSession(state.session); return; }
   if (!state.verified) return;
-  if (connected.click(action)) return;
+  if (daily.click(action) || connected.click(action)) return;
   if ('close' in action) closeDialog();
   else if ('view' in action) go(action.view);
   else if ('metric' in action) go(...action.metric.split('|'));
@@ -378,9 +395,16 @@ document.addEventListener('click', async event => {
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
   else if ('reminders' in action) reminderList();
-  else if ('open' in action) openRecord(action.open, ctx);
+  else if ('open' in action) {
+    const item = state.rows.find(row => row.id === action.open);
+    if (item && sectionOf(item) === 'Einkaufen') {
+      daily.state.listId = item.id;
+      go('Einkaufen');
+    } else openRecord(action.open, ctx);
+  }
   else if ('create' in action) editRecord(action.create, null, ctx,
     action.create === 'Kalender' && state.calendar.selected ? { date: state.calendar.selected } : {});
+  else if ('calendarToday' in action) showCalendarDate(today());
   else if ('calendarArchive' in action) go('Kalender', 'archiv');
   else if ('day' in action) {
     state.calendar.selected = action.day;
@@ -419,6 +443,7 @@ document.addEventListener('click', async event => {
 app.addEventListener('input', handleFilter);
 app.addEventListener('change', handleFilter);
 app.addEventListener('submit', event => {
+  daily.submitPage(event);
   if (event.target.matches('#search-form,#export-form')) event.preventDefault();
   if (event.target.matches('#mail-search')) {
     event.preventDefault();

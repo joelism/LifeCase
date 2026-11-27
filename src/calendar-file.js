@@ -35,7 +35,8 @@ export function calendarFile(items, now = new Date()) {
       'DTSTAMP:' + now.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z');
     if (time) {
       lines.push('DTSTART;TZID=Europe/Zurich:' + stamp(date) + 'T' + clock(time));
-      if (item.endTime > time) lines.push('DTEND;TZID=Europe/Zurich:' + stamp(date) + 'T' + clock(item.endTime));
+      const endDay = item.endDate && item.endDate >= date ? item.endDate : date;
+      if (item.endTime && (endDay > date || item.endTime > time)) lines.push('DTEND;TZID=Europe/Zurich:' + stamp(endDay) + 'T' + clock(item.endTime));
     } else {
       lines.push('DTSTART;VALUE=DATE:' + stamp(date), 'DTEND;VALUE=DATE:' + stamp(shiftDate(date, 1)));
     }

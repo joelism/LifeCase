@@ -1,3 +1,4 @@
+import { pollRules } from './mail-poll.js';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
 import { authorizationUrl, exchange, Failure, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
 
@@ -132,6 +133,17 @@ Deno.serve(async req => {
     try { return await callbackRequest(url); }
     catch { return new Response('Die LifeCase-Freigabe konnte nicht abgeschlossen werden.', { status: 503, headers: baseHeaders }); }
   }
+  if (url.pathname.endsWith('/poll-mail') && req.method === 'POST') {
+    const proof = req.headers.get('x-lifecase-job') || '';
+    if (!/^[0-9a-f]{64}$/.test(proof)) return jsonify({ problem: 'Zugriff verweigert.' }, 401, baseHeaders);
+    try {
+      const permitted = unwrap(await service.rpc('lifecase_mail_job_ok', { p_token: proof }));
+      if (!permitted) return jsonify({ problem: 'Zugriff verweigert.' }, 401, baseHeaders);
+      return jsonify(await pollRules(service, activeLink), 200, baseHeaders);
+    } catch {
+      return jsonify({ problem: 'Mailprüfung fehlgeschlagen.' }, 503, baseHeaders);
+    }
+  }
   const origin = req.headers.get('origin') || '';
   if (!apps.has(origin)) return jsonify({ problem: 'Diese LifeCase-Adresse ist nicht freigegeben.' }, 403, baseHeaders);
   const headers = { ...baseHeaders, 'Access-Control-Allow-Origin': origin,
@@ -147,6 +159,7 @@ Deno.serve(async req => {
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Failure(400, 'Ungültige LifeCase-Anfrage.');
     const { action, provider } = values;
     if (action === 'status') return jsonify(await status(user), 200, headers);
+    if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
     if (typeof provider !== 'string' || !Object.hasOwn(providers, provider)) throw new Failure(400, 'Unbekannte Verbindung.');
     if (action === 'start') return jsonify(await begin(user, provider, origin), 200, headers);
     if (action === 'disconnect') return jsonify(await disconnect(user, provider), 200, headers);

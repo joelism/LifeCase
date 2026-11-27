@@ -42,7 +42,7 @@ export function mailboxView(state) {
     '<span class="row-info"><span class="row-title">' + esc(row.subject) + '</span><span class="row-sub">' +
     esc([row.sender, showTimestamp(row.date)].filter(Boolean).join(' · ')) + '</span></span><span class="row-tail">' +
     (row.hasAttachments ? icon('paperclip', 17) : '') + icon('right', 16) + '</span></button>').join('');
-  return heading('Posteingang', button('.eml importieren', 'mail-import', '', 'upload') + button('Verbindungen', 'view', 'Verbindungen', 'link')) +
+  return heading('Posteingang', button('.eml importieren', 'mail-import', '', 'upload') + button('Terminprüfung', 'view', 'Terminprüfung', 'calendar') + button('Verbindungen', 'view', 'Verbindungen', 'link')) +
     (state.statusLoading && !choices.length ? empty('mail', 'Verbindungen werden geprüft …') : !choices.length ?
       '<div class="panel">' + empty('mail', 'Verbinde dein E-Mail-Konto', 'Du kannst auch eine als .eml gespeicherte Nachricht direkt importieren.',
         button('Zu den Verbindungen', 'view', 'Verbindungen', 'link', 'primary')) + '</div>' : mailControls +

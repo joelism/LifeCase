@@ -7,14 +7,14 @@ const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: C
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
 const shortMonth = new Intl.DateTimeFormat('de-CH', { month: 'short', timeZone: CH_ZONE });
 const kindStyle = {
-  Termin: ['calendar',''], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
+  Termin: ['calendar',''], Schicht: ['clock','green'], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
   Arztzeugnis: ['badge','rose'], Erinnerung: ['bell','amber'], Gespräch: ['message',''],
   Arztbesuch: ['heart','rose'], Wiedervorlage: ['refresh','amber'],
 };
 const statusColor = value => ({ Abgeschlossen: 'green', Erledigt: 'green', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
 
-export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.0</small></span>';
-const navGroups = [['', 'Übersicht', 'Kalender', 'Posteingang'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Gesundheitsdaten'], ['Werkzeuge', 'Suche', 'PDF-Export', 'Verbindungen']];
+export const brand = '<span class="brand"><img src="./icon-192.png" width="39" height="39" alt=""><span>LifeCase</span><small class="edition">2.1</small></span>';
+const navGroups = [['', 'Übersicht', 'Kalender', 'Einkaufen', 'Scannen'], ['Posteingang', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Gesundheitsdaten'], ['Werkzeuge', 'Suche', 'PDF-Export', 'Verbindungen']];
 const navButton = (label, view, compact = false) => '<button class="' + (compact ? '' : 'nav-item') + '" type="button" data-view="' + esc(label) + '"' +
   (view === label ? ' aria-current="page"' : '') + '>' + icon(sections[label].icon, compact ? 21 : 18) + esc(label) + '</button>';
 
@@ -30,7 +30,7 @@ export function shell(view, inner, state) {
     (activeReminderCount ? ', ' + activeReminderCount + ' fällig' : '') + '">' + icon('bell', 19) + '</button><button type="button" class="icon-btn" data-reload="" aria-label="Synchronisieren">' +
     icon('refresh', 19) + '</button></div></header><main id="main" class="main" tabindex="-1">' +
     (state.error ? '<div class="banner" role="alert">' + icon('info', 18) + esc(state.error) + '</div>' : '') + inner +
-    '</main></div><nav class="bottom-nav mobile" aria-label="Mobile Navigation">' + ['Übersicht', 'Fälle', 'Kalender', 'Posteingang'].map(label => navButton(label, view, true)).join('') +
+    '</main></div><nav class="bottom-nav mobile" aria-label="Mobile Navigation">' + ['Übersicht', 'Kalender', 'Einkaufen', 'Scannen'].map(label => navButton(label, view, true)).join('') +
     '<button type="button" data-menu="" aria-expanded="' + state.menu + '">' + icon('menu', 21) + 'Mehr</button></nav></div>';
 }
 export const heading = (section, actions = '') => '<div class="heading"><div><h1>' + esc(section) + '</h1><p>' + esc(sections[section].description) + '</p></div>' +
@@ -40,7 +40,7 @@ export const panel = (title, body, action = '') => '<section class="panel"><div 
 export function recordRow(row, info = '', item = null) {
   const [symbol, color] = item ? kindStyle[item.kind] ?? ['calendar', ''] : [sections[sectionOf(row)]?.icon ?? 'file', ''];
   const status = row.archived_at ? 'Archiviert' : item ? item.kind : value(row, 'status') || value(row, 'kind');
-  const details = info || (item ? [showDate(item.date), item.time, item.state !== 'Offen' ? item.state : ''].filter(Boolean).join(' · ') :
+  const details = info || (item ? [showDate(item.date), [item.time, item.endTime].filter(Boolean).join('–'), item.state !== 'Offen' ? item.state : ''].filter(Boolean).join(' · ') :
     [value(row, 'category') || value(row, 'organisation') || sectionOf(row), showDate(dateOf(row))].filter(Boolean).join(' · '));
   const emblem = item ? '<span class="date-badge"><small>' + esc(shortMonth.format(new Date(item.date + 'T12:00:00Z'))) + '</small>' + esc(item.date.slice(-2)) + '</span>' :
     '<span class="tile-icon ' + color + '">' + icon(symbol, 19) + '</span>';
@@ -66,17 +66,21 @@ function externalStatus(connected) {
   return messages + (connected.calendarLoading ? '<p class="hint calendar-sync" role="status">Externe Kalender werden geladen …</p>' : '');
 }
 
-export function dashboard(rows, loading, connected) {
+export function dashboard(rows, loading, connected, dailyActions = '') {
   const day = today();
   const active = rows.filter(isActive);
   const open = active.filter(row => sectionOf(row) === 'Fälle' && value(row, 'status') !== 'Abgeschlossen');
   const timeline = displayedAgenda(active, connected.events).filter(item => item.state === 'Offen');
-  const appointments = timeline.filter(item => ['Termin', 'Gespräch', 'Arztbesuch'].includes(item.kind) && item.date >= day);
+  const appointments = timeline.filter(item => ['Termin', 'Gespräch', 'Arztbesuch', 'Schicht'].includes(item.kind) && item.date >= day);
   const tasks = timeline.filter(item => ['Aufgabe', 'Frist'].includes(item.kind));
   const certs = timeline.filter(item => item.kind === 'Arztzeugnis' && item.date >= day && dayDistance(day, item.date) <= 30);
   const reminders = timeline.filter(item => reminderDue(item, day));
   const due = timeline.filter(item => item.date >= day || ['Aufgabe','Frist','Wiedervorlage'].includes(item.kind));
   const overdue = tasks.filter(item => item.date < day);
+  const todaysItems = timeline.filter(item => item.date === day);
+  const todays = panel('Heute', todaysItems.length ? todaysItems.slice(0, 8).map(agendaRow).join('') :
+    empty('calendar', loading ? 'Wird synchronisiert …' : 'Heute keine offenen Einträge'),
+    jump('Tagesansicht', 'calendar-today', '', 'calendar'));
   const metricItems = [
     ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
     ['Nächste Termine', appointments.length, 'calendar', 'green', 'Kalender|termine'],
@@ -85,20 +89,22 @@ export function dashboard(rows, loading, connected) {
   ];
   return '<section class="hero">' + motif + '<div><span class="hero-date">' + esc(labels.format(new Date())) +
     '</span><h1>Dein LifeCase</h1><div class="hero-actions">' + button('Eintrag erfassen', 'quick', '', 'plus', 'hero-cta') +
-    button('Posteingang', 'view', 'Posteingang', 'mail', 'hero-secondary') + '</div></div></section><div class="metrics">' +
+    button('Dokument scannen', 'scan-start', 'document', 'camera', 'hero-secondary') + '</div></div></section><div class="metrics">' +
     metricItems.map(([label, count, symbol, color, target]) => '<button type="button" class="metric" data-metric="' + esc(target) + '"><span class="tile-icon ' + color + '">' + icon(symbol, 19) +
       '</span><span class="metric-arrow">' + icon('arrow', 15) + '</span><strong>' + (loading ? '–' : count) + '</strong><span class="metric-label">' + esc(label) + '</span></button>').join('') +
     '</div>' + (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(item => recordRow(item.row, '', item)).join(''), jump('Alle', 'reminders', '')) : '') +
-    externalStatus(connected) + '<div class="dash-grid">' + panel('Bevorstehend', due.length ? due.slice(0, 6).map(agendaRow).join('') :
+    externalStatus(connected) + '<div class="dash-grid">' + todays + panel('Bevorstehend', due.some(item => item.date > day) ? due.filter(item => item.date > day).slice(0, 6).map(agendaRow).join('') :
       empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge', 'Termine, Fristen und Arztzeugnisse erscheinen hier.'), jump('Zum Kalender', 'view', 'Kalender')) +
     panel('Offene Fälle', open.length ? open.slice(0, 5).map(row => recordRow(row)).join('') :
-      empty('folder', loading ? 'Wird synchronisiert …' : 'Keine offenen Fälle', '', button('Fall anlegen', 'create', 'Fälle', 'plus')), jump('Alle Fälle', 'view', 'Fälle')) + '</div>' +
+      empty('folder', loading ? 'Wird synchronisiert …' : 'Keine offenen Fälle', '', button('Fall anlegen', 'create', 'Fälle', 'plus')), jump('Alle Fälle', 'view', 'Fälle')) + '</div>' + dailyActions +
     (overdue.length ? '<div class="dash-secondary">' + panel('Überfällige Aufgaben und Fristen', overdue.slice(0, 6).map(agendaRow).join(''),
       jump('Alle anzeigen', 'metric', 'Kalender|aufgaben')) + '</div>' : '') +
     '<div class="dashboard-links"><div class="action-card"><span class="tile-icon rose">' + icon('activity', 21) +
     '</span><div><strong>Gesundheitsdaten</strong><p>Apple-Health-Tageswerte ansehen</p></div>' + jump('Öffnen', 'view', 'Gesundheitsdaten') +
     '</div><div class="action-card"><span class="tile-icon">' + icon('link', 21) +
-    '</span><div><strong>Verbindungen</strong><p>Outlook, Gmail und Kalender</p></div>' + jump('Öffnen', 'view', 'Verbindungen') + '</div></div>';
+    '</span><div><strong>Verbindungen</strong><p>Outlook, Gmail und Kalender</p></div>' + jump('Öffnen', 'view', 'Verbindungen') +
+    '</div><div class="action-card"><span class="tile-icon">' + icon('mail', 21) +
+    '</span><div><strong>Posteingang</strong><p>E-Mails und Anhänge</p></div>' + jump('Öffnen', 'view', 'Posteingang') + '</div></div>';
 }
 
 export function sectionPage(section, rows, filter, loading) {
@@ -121,7 +127,7 @@ export function sectionPage(section, rows, filter, loading) {
       empty(info.icon, loading ? 'Wird synchronisiert …' : filter ? 'Keine passenden Einträge' : info.empty, '', filter ? '' : button(info.create, 'create', section, 'plus'))) + '</section>';
 }
 
-const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
+const calendarKinds = [['', 'Alle Arten'], ['termine', 'Termine und Besuche'], ['Schicht', 'Schichten'], ['aufgaben', 'Aufgaben und Fristen'], ['Arztzeugnis', 'Arztzeugnisse'], ['Erinnerung', 'Erinnerungen'], ['Wiedervorlage', 'Wiedervorlagen']];
 export function calendarPage(rows, calendar, connected) {
   const day = today();
   const first = calendar.month + '-01';

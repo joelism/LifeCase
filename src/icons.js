@@ -1,4 +1,6 @@
 const icons = {
+  camera: '<path d="M4 7h4l2-3h4l2 3h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="14" r="3.2"/>',
+  cart: '<path d="M2 4h2l3.2 11h11.3l2.4-7H6"/><circle cx="9" cy="20" r="1.2"/><circle cx="17.5" cy="20" r="1.2"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6"/>',
   link: '<path d="M10 13.5a3.5 3.5 0 0 0 5 .2l4-4a3.5 3.5 0 0 0-5-5l-2 2m2 3.8a3.5 3.5 0 0 0-5-.2l-4 4a3.5 3.5 0 0 0 5 5l2-2"/>',
   activity: '<path d="M2 12h5l3-7 4 14 3-7h5"/>',

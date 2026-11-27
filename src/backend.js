@@ -116,3 +116,14 @@ export async function storeImportedOriginal(row, file) {
     'a' + fingerprint.slice(17, 20), fingerprint.slice(20, 32)].join('-');
   return uploadOriginal(row, file, existing, proposedId);
 }
+
+export async function findRecord(id) {
+  return get(await db.from('lifecase_records').select('*').eq('id', id).single());
+}
+
+export async function saveIntakeRecord(fields) {
+  const attempt = await db.from('lifecase_records').insert({ section: 'Kalender', fields }).select().single();
+  if (attempt.error?.code !== '23505') return get(attempt);
+  return get(await db.from('lifecase_records').select('*').eq('section', 'Kalender')
+    .eq('fields->>intakeKey', fields.intakeKey).single());
+}
