@@ -13,9 +13,9 @@ export function connectionsView(state) {
     const current = state.accounts?.[key];
     return '<article class="panel integration-card"><div class="provider-heading">' + providerBadge(key) + '<div><h2>' + provider.title +
       '</h2><p>' + provider.calendar + ' und E-Mails</p></div></div>' +
-      (current?.connected ? tag('Verbunden', 'green') + '<p class="connection-address">' + esc(current.email) + '</p><div class="actions">' +
+      (current?.connected ? tag('Verbunden', 'positive') + '<p class="connection-address">' + esc(current.email) + '</p><div class="actions">' +
         button('Posteingang öffnen', 'mail-provider', key, 'mail', 'primary') +
-        (current.calendarWrite ? tag('Kalender-Schreibzugriff', 'green') : current.available ? button('Pausen im Kalender erlauben', 'connect-calendar-write', key, 'calendar') : '') +
+        (current.calendarWrite ? tag('Kalender-Schreibzugriff', 'positive') : current.available ? button('Pausen im Kalender erlauben', 'connect-calendar-write', key, 'calendar') : '') +
         button('Trennen', 'disconnect', key, '', 'danger') + '</div>' :
         current?.available ? '<p>Termine im Kalender anzeigen und einzelne Nachrichten deinen Dossiers zuordnen.</p>' + button('Verbinden', 'connect', key, 'link', 'primary') :
         '<p>' + (state.statusLoading ? 'Verbindung wird geprüft …' : 'Die Anbieterregistrierung ist noch offen.') + '</p>' +
@@ -31,7 +31,7 @@ export function connectionsView(state) {
     button('Gesundheitsdaten öffnen', 'view', 'Gesundheitsdaten', 'arrow') +
     '</article><article class="panel integration-card"><div class="provider-heading"><span class="provider-mark google">G</span>' +
     '<div><h2>Google Drive</h2><p>Scans und Originaldateien</p></div></div>' +
-    (state.accounts?.drive?.connected ? tag('Verbunden', 'green') : '') +
+    (state.accounts?.drive?.connected ? tag('Verbunden', 'positive') : '') +
     button('Google Drive öffnen', 'view', 'Google Drive', 'arrow') + '</article></div>';
 }
 

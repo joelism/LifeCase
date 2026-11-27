@@ -31,7 +31,7 @@ export function shoppingPage(rows, state) {
     button('Liste bearbeiten', 'shop-rename', '', 'edit') + button('Liste archivieren', 'shop-archive', '', 'archive') + '</div>';
   return heading('Einkaufen', button('Neue Liste', 'shop-create', '', 'plus', 'primary')) +
     (options ? '<div class="theme-choices shopping-tabs">' + options + '</div>' : '') +
-    (list ? panel(nameOf(list), body, tag((items.length - checked) + ' offen', 'green')) :
+    (list ? panel(nameOf(list), body, tag((items.length - checked) + ' offen', 'positive')) :
       '<div class="panel">' + empty('cart', 'Noch keine Einkaufsliste', '', button('Erste Liste anlegen', 'shop-create', '', 'plus')) + '</div>') +
     (shoppingRows(rows).some(row => !isActive(row)) ? '<details class="shopping-archive panel"><summary>Archivierte Listen</summary>' +
       shoppingRows(rows).filter(row => !isActive(row)).map(row => '<div class="shopping-archived-row"><span>' + esc(nameOf(row)) + '</span>' +
@@ -45,7 +45,7 @@ export function scanPage(rows) {
     ['plan', 'Arbeitsplan', 'Arbeitsplan als Foto oder Screenshot hinzufügen und deine Schichten in den Kalender übernehmen.', 'calendar', 'Arbeitsplan hochladen'],
   ];
   return heading('Scannen') + '<div class="scan-grid">' + cards.map(([mode,title,text,symbol,action]) =>
-    '<article class="panel scan-card"><span class="tile-icon ' + (mode === 'plan' ? 'green' : '') + '">' + icon(symbol, 22) +
+    '<article class="panel scan-card"><span class="tile-icon ' + (mode === 'plan' ? 'positive' : '') + '">' + icon(symbol, 22) +
     '</span><div><h2>' + title + '</h2><p>' + text + '</p></div>' + button(action, 'scan-start', mode, 'plus', 'primary') + '</article>').join('') +
     '</div><div class="dash-secondary">' + panel('Letzte Scans', scans.length ? scans.map(row => recordRow(row)).join('') :
       empty('file', 'Noch keine gescannten Dokumente')) + '</div>';

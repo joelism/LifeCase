@@ -13,7 +13,7 @@ import { bindRecordActions, closeDialog, editRecord, errorAt, openDialog, openRe
 import { icon } from './icons.js';
 import { calendarEntries, nameOf, recordSections, reminderDue, sectionOf, sections, today, value } from './model.js';
 import { cleanDisplayName, profileName, profileUpdate } from './profile.js';
-import { button, empty, esc, motif } from './ui.js';
+import { button, empty, esc } from './ui.js';
 import { brand, calendarPage, dashboard, exportCandidates, exportControls, exportKinds, exportList, heading, panel, recordRow, searchControls, searchResults, sectionPage, selectedCalendar, shell } from './views.js';
 
 const app = document.querySelector('#app');
@@ -73,7 +73,7 @@ function notify(text) {
 function applyTheme() {
   const isDark = state.theme === 'dark' || (state.theme === 'system' && themeMedia.matches);
   document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-  document.querySelector('meta[name="theme-color"]').content = isDark ? '#101c23' : '#f2f7f6';
+  document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
 }
 applyTheme();
 themeMedia.addEventListener('change', applyTheme);
@@ -138,7 +138,7 @@ function authPage() {
         '<form id="verify-form">' + secret + factors + codeInput + formError + '<button type="submit" class="button primary">Bestätigen</button></form>') +
       button('Abmelden', 'signout', '', 'logout');
   }
-  return '<div class="auth"><aside class="auth-visual">' + motif + brand + '<div><h2>Willkommen bei LifeCase</h2><p>Deine Termine, Dossiers und Erinnerungen.</p></div>' +
+  return '<div class="auth"><aside class="auth-visual">' + brand + '<div><h2>Willkommen bei LifeCase</h2><p>Deine Termine, Dossiers und Erinnerungen.</p></div>' +
     '<div class="privacy">' + icon('lock', 16) + 'Geschützter Zugang</div></aside><main class="auth-main"><div class="auth-card">' + content + '</div></main></div>';
 }
 function settings() {

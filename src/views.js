@@ -11,11 +11,11 @@ const labels = new Intl.DateTimeFormat('de-CH', { dateStyle: 'full', timeZone: C
 const monthFormat = new Intl.DateTimeFormat('de-CH', { month: 'long', year: 'numeric', timeZone: CH_ZONE });
 const shortMonth = new Intl.DateTimeFormat('de-CH', { month: 'short', timeZone: CH_ZONE });
 const kindStyle = {
-  Termin: ['calendar',''], Schicht: ['clock','green'], Pause: ['sun','green'], Aufgabe: ['tasks','green'], Frist: ['flag','amber'],
+  Termin: ['calendar',''], Schicht: ['clock','positive'], Pause: ['sun','positive'], Aufgabe: ['tasks','positive'], Frist: ['flag','amber'],
   Arztzeugnis: ['badge','rose'], Rezept: ['file','rose'], Erinnerung: ['bell','amber'], Gespräch: ['message',''],
   Arztbesuch: ['heart','rose'], Wiedervorlage: ['refresh','amber'],
 };
-const statusColor = value => ({ Abgeschlossen: 'green', Erledigt: 'green', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
+const statusColor = value => ({ Abgeschlossen: 'positive', Erledigt: 'positive', Wartet: 'amber', Abgesagt: 'rose', Archiviert: 'amber' })[value] || '';
 
 export const brand = '<span class="brand"><span class="brand-mark">' + icon('logo', 25) + '</span><span>LifeCase</span></span>';
 const navGroups = [['', 'Übersicht', 'Meine Woche', 'Kalender', 'Einkaufen', 'Scannen'], ['Postfach', 'Posteingang', 'Terminprüfung'], ['Dossiers', 'Fälle', 'Chronik', 'Gespräche', 'Beweismittel', 'Personen'], ['Gesundheit', 'Gesundheit', 'Arztzeugnisse', 'Rezepte', 'Gesundheitsdaten'], ['Werkzeuge', 'Erinnerungen', 'Google Drive', 'Suche', 'PDF-Export', 'Verbindungen']];
@@ -80,13 +80,8 @@ function externalStatus(connected) {
   return messages + (connected.calendarLoading ? '<p class="hint calendar-sync" role="status">Externe Kalender werden geladen …</p>' : '');
 }
 
-const horizon = '<svg class="hero-horizon" viewBox="0 0 510 260" preserveAspectRatio="xMidYMid slice" fill="none" aria-hidden="true">' +
-  '<path d="M122 260C108 168 199 88 313 84c85-3 160 27 211 72M91 260C83 147 189 51 311 47c103-3 171 36 223 82M59 260C56 119 183 13 313 11c97-2 190 28 225 79M153 260c-13-73 58-135 159-138 66-2 126 21 173 51" stroke="currentColor"/>' +
-  '<path d="M242 115v20m-10-10h20M403 41v14m-7-7h14M435 190v28m-14-14h28" stroke="currentColor" stroke-linecap="round"/>' +
-  '<circle cx="242" cy="125" r="3" fill="currentColor"/><circle cx="435" cy="204" r="4" fill="currentColor"/></svg>';
-
-function shortcut(symbol, label, action, target, color = '') {
-  return '<button type="button" class="dash-shortcut" data-' + action + '="' + esc(target) + '"><span class="tile-icon ' + color + '">' +
+function shortcut(symbol, label, action, target) {
+  return '<button type="button" class="dash-shortcut" data-' + action + '="' + esc(target) + '"><span class="tile-icon">' +
     icon(symbol, 19) + '</span><span>' + esc(label) + '</span>' + icon('right', 14) + '</button>';
 }
 
@@ -117,7 +112,7 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   const todaysItems = timeline.filter(item => item.date === day);
   const lunch = !loading && connected.accounts && !connected.calendarLoading && !connected.calendarErrors.length &&
     todaysItems.filter(item => appointmentKinds.includes(item.kind) && item.external?.busy !== false).length >= 2 ? findLunchSlot(timeline, day) : null;
-  const lunchCard = lunch ? '<section class="lunch-nudge panel"><span class="tile-icon green">' + icon('sun', 20) +
+  const lunchCard = lunch ? '<section class="lunch-nudge panel"><span class="tile-icon positive">' + icon('sun', 20) +
     '</span><div><strong>Platz für deine Mittagspause</strong><p>' + esc(lunch.time + '–' + lunch.endTime) +
     '</p></div>' + button('Vorschlag prüfen', 'assistant-lunch', '', 'arrow') + '</section>' : '';
   const now = new Intl.DateTimeFormat('sv-SE', { timeZone: CH_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
@@ -129,7 +124,7 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
     empty('calendar', loading ? 'Wird synchronisiert …' : 'Keine bevorstehenden Einträge'), jump('Kalender', 'view', 'Kalender'));
   const glance = '<section class="dash-glance panel"><h2>Im Blick</h2><div class="dash-glance-list">' + [
     ['Offene Fälle', open.length, 'folder', '', 'Fälle|offen'],
-    ['Aufgaben und Fristen', tasks.length + undated.length, 'tasks', 'green', 'Meine Woche|'],
+    ['Aufgaben und Fristen', tasks.length + undated.length, 'tasks', 'positive', 'Meine Woche|'],
     ['Fällige Erinnerungen', reminders.length, 'bell', 'rose', 'Erinnerungen|'],
     ['Terminvorschläge', suggestions, 'mail', 'amber', 'Terminprüfung|'],
   ].map(([label, count, symbol, color, target]) => '<button type="button" class="glance-row" data-metric="' + esc(target) +
@@ -139,13 +134,13 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
     jump('Alle Aufgaben', 'view', 'Meine Woche')) : '') +
     (reminders.length ? panel('Fällige Erinnerungen', reminders.slice(0, 4).map(agendaRow).join(''),
       jump('Alle Erinnerungen', 'view', 'Erinnerungen')) : '');
-  return '<section class="hero dashboard-hero">' + horizon + '<div class="hero-copy"><span class="hero-date">' +
+  return '<section class="dashboard-hero"><div class="hero-copy"><span class="hero-date">' +
     icon('calendar', 15) + esc(labels.format(new Date())) + '</span><h1>' + esc(greeting) + '</h1><div class="hero-actions">' +
-    button('Terminassistent', 'assistant', '', 'chat', 'hero-cta') + button('Meine Woche', 'view', 'Meine Woche', 'week', 'hero-week') + (!name ?
+    button('Terminassistent', 'assistant', '', 'chat', 'hero-cta') + button('Meine Woche', 'view', 'Meine Woche', 'week', 'hero-week') + '</div>' + (!name ?
       '<button type="button" class="hero-personalize" data-view="Einstellungen">' + icon('people', 17) + 'Begrüssung anpassen' + '</button>' : '') +
-    '</div></div>' + featuredAppointment(next, day) + '</section><nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
-    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('camera', 'Dokument scannen', 'scan-start', 'document', 'amber') +
-    shortcut('cart', 'Einkaufen', 'view', 'Einkaufen', 'green') + shortcut('mail', 'Posteingang', 'view', 'Posteingang', 'rose') +
+    '</div>' + featuredAppointment(next, day) + '</section><nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('camera', 'Dokument scannen', 'scan-start', 'document') +
+    shortcut('cart', 'Einkaufen', 'view', 'Einkaufen') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
     '</nav>' + externalStatus(connected) + lunchCard + '<div class="dashboard-grid"><div class="dashboard-today">' + todayPanel +
     '</div><aside class="dashboard-side" aria-label="Wichtige Einträge">' + alerts + glance +
     (open.length ? panel('Aktive Dossiers', open.slice(0, 3).map(row => recordRow(row)).join(''), jump('Alle Fälle', 'view', 'Fälle')) : '') +

@@ -15,4 +15,3 @@ export const button = (label, action, id = '', symbol = '', className = '') =>
 export const empty = (symbol, title, text = '', action = '') =>
   '<div class="empty"><span class="empty-icon">' + icon(symbol, 23) + '</span><strong>' + esc(title) + '</strong>' +
   (text ? '<p>' + esc(text) + '</p>' : '') + action + '</div>';
-export const motif = '<div class="hero-deco" aria-hidden="true"><svg viewBox="0 0 340 230" fill="none"><circle cx="217" cy="116" r="108"/><circle cx="217" cy="116" r="82"/><circle cx="217" cy="116" r="54"/><path d="M0 155h107l23-36 30 51 32-71 28 46h120"/><circle cx="192" cy="99" r="5" class="dot"/><circle cx="130" cy="119" r="4" class="dot"/><circle cx="269" cy="145" r="4" class="dot"/></svg></div>';
