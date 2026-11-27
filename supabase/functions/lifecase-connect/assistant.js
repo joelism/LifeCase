@@ -129,17 +129,22 @@ function briefingOf(value, now) {
 async function modelResponse({ apiKey, input, instructions, outputFormat, transport }) {
   let response;
   try {
+    // Cloudflare Workers need manual mode to reject redirects without forwarding the API key.
     response = await transport('https://api.openai.com/v1/responses', {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(20000),
       headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-5-mini', instructions, input, store: false,
         reasoning: { effort: 'minimal' }, max_output_tokens: 1000, text: { format: outputFormat } }),
     });
-  } catch {
-    throw new AssistantFailure(503, 'OpenAI antwortet gerade nicht. Versuche es nochmals.');
+  } catch (error) {
+    console.warn('LifeCase OpenAI transport:', error?.name || 'Error');
+    throw new AssistantFailure(503, 'Die Verbindung zu OpenAI ist unterbrochen. Du kannst deine Nachricht erneut senden.');
   }
-  if (!response.ok) throw new AssistantFailure(503, response.status === 429 ?
-    'OpenAI hat das Anfragelimit erreicht. Versuche es später erneut.' : 'Die OpenAI-Verbindung ist gerade nicht verfügbar.');
+  if (!response.ok) {
+    console.warn('LifeCase OpenAI upstream status:', response.status);
+    throw new AssistantFailure(503, response.status === 429 ?
+      'OpenAI hat das Anfragelimit erreicht. Versuche es später erneut.' : 'Die OpenAI-Verbindung ist gerade nicht verfügbar.');
+  }
   const data = await response.json().catch(() => null);
   if (data?.status !== 'completed' || !Array.isArray(data.output)) throw badAnswer();
   const output = data.output.filter(item => item.type === 'message' && item.role === 'assistant')

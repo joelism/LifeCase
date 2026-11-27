@@ -18,7 +18,7 @@ test('LifeCase sends a bounded conversation to the OpenAI Responses API and vali
     transport: async (url, request) => {
       assert.equal(url, 'https://api.openai.com/v1/responses');
       assert.equal(request.headers.Authorization, 'Bearer synthetic-key');
-      assert.equal(request.redirect, 'error');
+      assert.equal(request.redirect, 'manual');
       const body = JSON.parse(request.body);
       assert.equal(body.store, false);
       assert.equal(body.model, 'gpt-5-mini');
@@ -31,6 +31,19 @@ test('LifeCase sends a bounded conversation to the OpenAI Responses API and vali
   });
   assert.deepEqual(result, { action: 'appointment', fields: { title: sample.title, date: sample.date,
     time: sample.time, endTime: sample.endTime, endDate: '', location: sample.location } });
+});
+
+test('OpenAI redirects fail without forwarding the request', async () => {
+  let calls = 0;
+  await assert.rejects(askAssistant({
+    apiKey: 'synthetic-key', values: { messages }, now,
+    transport: async (_url, request) => {
+      calls += 1;
+      assert.equal(request.redirect, 'manual');
+      return Response.redirect('https://example.com/elsewhere', 307);
+    },
+  }), { status: 503 });
+  assert.equal(calls, 1);
 });
 
 test('unsafe roles and malformed appointment intents cannot cause writes', async () => {

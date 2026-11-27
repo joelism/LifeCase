@@ -297,13 +297,21 @@ export function makeAssistant(ctx, currentAccounts) {
       event.preventDefault();
       if (!busy && aiAvailable !== null && field.value.trim()) form.requestSubmit();
     });
-    async function run(action) {
+    async function run(action, retryText = '') {
       if (busy) return;
       const epoch = ctx.epoch();
       busy = true;
       draw();
       try { await action(epoch); }
-      catch (error) { if (epoch === ctx.epoch()) add('assistant', message(error)); }
+      catch (error) {
+        if (epoch === ctx.epoch()) {
+          add('assistant', message(error));
+          if (retryText && !pendingMessage) {
+            pendingMessage = retryText;
+            if (field.isConnected && !field.value) field.value = retryText;
+          }
+        }
+      }
       finally {
         if (epoch === ctx.epoch()) {
           busy = false;
@@ -357,7 +365,7 @@ export function makeAssistant(ctx, currentAccounts) {
         const picked = pendingCase && findAssistantDossier(pendingCase.choices, text).match;
         if (picked) return run(epoch => chooseDossier(picked.id, epoch));
         pendingCase = null;
-        return run(epoch => useOpenAI(text, epoch));
+        return run(epoch => useOpenAI(text, epoch), text);
       }
       const task = interpretTask(text);
       const request = lunchRequest(text);
