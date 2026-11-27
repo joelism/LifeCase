@@ -216,6 +216,8 @@ dialog[open]{animation:enter .2s ease-out}
 .provider-mark.google{background:var(--rose-bg);color:var(--rose)}
 .provider-mark.apple{background:var(--positive-bg);color:var(--positive)}
 .theme-choices .provider-mark{width:24px;height:24px;font-size:13px;border-radius:6px}
+.health-import-grid input[type="date"]{min-width:0;max-width:100%}
+.health-import-progress progress{width:100%;accent-color:var(--accent)}
 .connection-guide{width:100%;font-size:13px;overflow-wrap:anywhere}
 .connection-guide summary,.health-history summary{cursor:pointer;color:var(--accent);font-weight:650}
 .connection-guide p,.connection-guide code{display:block;margin-top:8px}

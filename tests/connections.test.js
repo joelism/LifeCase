@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { strToU8, zipSync } from 'fflate';
+import { strToU8, Zip, ZipDeflate, zipSync } from 'fflate';
 import { displayedAgenda, expandEvents } from '../src/connected-model.js';
-import { openHealthExport, preferredHealthDays, summarizeHealthExport } from '../src/health-data.js';
+import { importHealthExport, preferredHealthDays } from '../src/health-data.js';
 import { readMailFile } from '../src/mail-file.js';
 import { connectionsView, healthView, mailboxView } from '../src/connected-views.js';
 import { calendarPage, dashboard } from '../src/views.js';
@@ -21,12 +21,48 @@ test('Apple Health supports ZIP and preserves source separation and the Swiss re
   const xmldata = '<HealthData>' + step.repeat(2) + core + unspecified +
     sample(stepType, 'iPhone', 900, '2026-11-27 06:15:00 +0100') + '</HealthData>';
   const zip = zipSync({ 'apple_health_export/export.xml': strToU8(xmldata), 'apple_health_export/export_cda.xml': strToU8('Ignored') });
-  const parsed = await openHealthExport(new Blob([zip]));
-  const grouped = summarizeHealthExport(parsed, day, day);
+  const grouped = await importHealthExport(new Blob([zip]), day, day);
   assert.deepEqual(grouped.map(row => [row.name, row.values[0].value]), [['iPhone', 900], ['Joel & Watch', 450], ['Watch', 6]]);
   const exported = grouped[1].values[0];
   const native = { ...exported, source: 'healthkit', value: 500 };
   assert.deepEqual(preferredHealthDays([native, exported], 'steps', day, day), [native]);
+});
+
+test('Apple Health imports a full archive over the old XML limit and filters by the selected day', async () => {
+  const chunks = [];
+  const zip = new Zip((error, chunk) => {
+    if (error) throw error;
+    chunks.push(chunk);
+  });
+  const xml = new ZipDeflate('apple_health_export/export.xml', { level: 1 });
+  zip.add(xml);
+  xml.push(strToU8('<HealthData><!--'));
+  const padding = new Uint8Array(1024 * 1024).fill(32);
+  for (let mb = 0; mb < 234; mb++) xml.push(padding);
+  xml.push(strToU8('-->' + sample(stepType, 'Old Watch', 200, '2025-01-01 01:00:00 +0100') +
+    sample(stepType, 'Test Watch', 800, '2026-11-27 16:00:00 +0100') + '</HealthData>'), true);
+  zip.end();
+  const archive = new Blob(chunks);
+  archive.arrayBuffer = () => assert.fail('The importer must read slices of the archive');
+  const groups = await importHealthExport(archive, day, day);
+  assert.deepEqual(groups.map(group => [group.name, group.values[0].value]), [['Test Watch', 800]]);
+});
+
+test('Apple Health reads split XML tags and UTF-8, ignores commented records and rejects a partial export', async () => {
+  const pad = 512 * 1024;
+  const header = '<HealthData>';
+  const split = new Blob([header, ' '.repeat(pad - header.length - 4), '<Rec',
+    sample(stepType, 'Montre Ä', 900, '2026-11-27 06:15:00 +0100').slice(4),
+    '<!--', sample(stepType, 'Fake', 20, '2026-11-27 06:15:00 +0100'), '--></HealthData>']);
+  const groups = await importHealthExport(split, day, day);
+  assert.deepEqual(groups.map(group => [group.name, group.values[0].value]), [['Montre Ä', 900]]);
+  const truncated = new Blob(['<HealthData>' + sample(stepType, 'Watch', 10, '2026-11-27 06:15:00 +0100')]);
+  await assert.rejects(importHealthExport(truncated, day, day), /vollständigen Apple-Health-Export/);
+  const damaged = zipSync({ 'export.xml': strToU8('<HealthData></HealthData>') }, { level: 0 });
+  damaged[30 + 'export.xml'.length + '<HealthData>'.length] = 32;
+  await assert.rejects(importHealthExport(new Blob([damaged]), day, day), /beschädigt oder unvollständig/);
+  const noXml = new Blob([zipSync({ 'export_cda.xml': strToU8('Ignored') })]);
+  await assert.rejects(importHealthExport(noXml, day, day), /keine export.xml/);
 });
 
 test('external calendar expands all-day events and sorts together with a local deadline', () => {

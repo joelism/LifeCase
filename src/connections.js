@@ -20,7 +20,7 @@ export function makeConnections(ctx) {
   let lastStatus = 0;
   let mailSerial = 0;
   let calendarSerial = 0;
-  let worker;
+  let stopHealthRead;
   const errorBox = '<p class="form-error" role="alert" hidden></p>';
   const submit = (label, symbol) => '<button type="submit" class="button primary">' + icon(symbol, 18) + esc(label) + '</button>';
   const update = (views = []) => {
@@ -34,8 +34,8 @@ export function makeConnections(ctx) {
   function reset() {
     ++mailSerial;
     ++calendarSerial;
-    worker?.terminate();
-    worker = null;
+    stopHealthRead?.();
+    stopHealthRead = null;
     lastStatus = 0;
     Object.assign(state, initial());
   }
@@ -300,11 +300,14 @@ export function makeConnections(ctx) {
       (!entry.lifeCasePause ? button('Vorbereiten', 'planner-external', key, 'tasks', 'primary') : ''));
   }
   function startHealthImport() {
-    const form = openDialog('Apple-Health-Export importieren', '<p>Öffne die Health-App auf dem iPhone, tippe auf dein Profil und wähle «Alle Gesundheitsdaten exportieren». Wähle anschliessend hier die ZIP- oder XML-Datei aus.</p>' +
-      '<div class="form-grid"><label class="input-wrap wide">Apple-Health-Export<input type="file" name="healthFile" accept=".zip,.xml,application/zip,application/xml,text/xml" required></label>' +
+    stopHealthRead?.();
+    const form = openDialog('Apple-Health-Export importieren', '<p>Wähle den vollständigen ZIP-Export aus Apple Health. Den Zeitraum legst du hier in LifeCase fest.</p>' +
+      '<div class="form-grid health-import-grid"><label class="input-wrap wide">Apple-Health-Export<input type="file" name="healthFile" accept=".zip,.xml,application/zip,application/xml,text/xml" required></label>' +
       '<label class="input-wrap">Von<input type="date" name="from" value="' + shiftDate(today(), -89) + '" max="' + today() + '" required></label>' +
       '<label class="input-wrap">Bis<input type="date" name="through" value="' + today() + '" max="' + today() + '" required></label></div>' +
-      '<p class="hint">Die Exportdatei wird im Browser gelesen. Du siehst die Messwerte und Quellen vor dem Speichern.</p>' + errorBox,
+      '<p class="hint">LifeCase liest die Datei auf diesem Gerät. Gespeichert werden die Tageswerte, die du in der Vorschau auswählst.</p>' +
+      '<div class="health-import-progress" data-health-progress hidden><p class="hint" role="status">Export wird gelesen …</p>' +
+      '<progress max="100" aria-label="Fortschritt beim Lesen des Exports"></progress></div>' + errorBox,
       button('Abbrechen', 'close') + submit('Vorschau laden', 'eye'), true).querySelector('form');
     form.addEventListener('submit', event => {
       event.preventDefault();
@@ -313,18 +316,32 @@ export function makeConnections(ctx) {
         const from = fields.get('from');
         const through = fields.get('through');
         if (from > through || from < shiftDate(through, -364) || through > today()) throw userError('Wähle einen Zeitraum von höchstens 365 Tagen bis heute.');
-        worker?.terminate();
+        stopHealthRead?.();
         const parser = new Worker(new URL('./health-worker.js', import.meta.url), { type: 'module' });
-        worker = parser;
+        const dialog = form.closest('dialog');
+        const progress = form.querySelector('[data-health-progress]');
+        progress.hidden = false;
+        progress.querySelector('progress').removeAttribute('value');
+        form.querySelector('.form-error').hidden = true;
+        let cancel;
         const groups = await new Promise((resolve, reject) => {
-          parser.onmessage = ({ data }) => data.error ? reject(userError(data.error)) : resolve(data.groups);
-          parser.onerror = () => reject(userError('Die Datei konnte nicht gelesen werden.'));
+          cancel = () => resolve(null);
+          stopHealthRead = cancel;
+          dialog.addEventListener('close', cancel, { once: true });
+          parser.onmessage = ({ data }) => {
+            if (data.error) reject(userError(data.error));
+            else if (typeof data.progress === 'number') progress.querySelector('progress').value = data.progress;
+            else resolve(data.groups);
+          };
+          parser.onerror = () => reject(userError('Die Datei konnte auf diesem Gerät nicht gelesen werden.'));
           parser.postMessage({ file: fields.get('healthFile'), from, through });
         }).finally(() => {
           parser.terminate();
-          if (worker === parser) worker = null;
+          dialog.removeEventListener('close', cancel);
+          progress.hidden = true;
+          if (stopHealthRead === cancel) stopHealthRead = null;
         });
-        if (!form.isConnected || !form.closest('dialog').open) return;
+        if (!groups || !form.isConnected || !dialog.open) return;
         showHealthPreview(groups, from, through);
       });
     });
