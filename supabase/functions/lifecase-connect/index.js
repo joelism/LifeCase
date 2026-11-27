@@ -6,6 +6,7 @@ import { authorizationUrl, createLunchBlock, driveOriginal, exchange, Failure, l
 const project = Deno.env.get('SUPABASE_URL');
 const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ||
   Object.values(JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') || '{}'))[0];
+const studioAssistant = 'https://charakter-studio.skippingbookmark.chatgpt.site/api/lifecase/assistant';
 const callback = project + '/functions/v1/lifecase-connect/callback';
 const apps = new Map([
   ['https://joelism.github.io', 'https://joelism.github.io/LifeCase/'],
@@ -119,6 +120,27 @@ async function disconnect(user, provider) {
   }
   return { disconnected: true };
 }
+async function askStudio(req, config, values) {
+  let result;
+  try {
+    result = await fetch(studioAssistant, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(32000),
+      headers: {
+        'Content-Type': 'application/json',
+        'OAI-Sites-Authorization': 'Bearer ' + config.service_token,
+        'X-LifeCase-Session': req.headers.get('authorization').slice(7),
+      },
+      body: JSON.stringify({ messages: values.messages, lastDate: values.lastDate }),
+    });
+  } catch {
+    throw new Failure(503, 'Die Verbindung zum OpenAI-Assistenten ist gerade unterbrochen.');
+  }
+  const output = await result.json().catch(() => null);
+  if (!result.ok || !output?.action) throw new Failure(result.status === 400 || result.status === 422 ? 422 : 503,
+    output?.problem || 'Die Verbindung zum OpenAI-Assistenten ist gerade nicht verfügbar.');
+  return output;
+}
+
 function arg(values, key, limit, required = false) {
   const value = values[key] ?? '';
   if (typeof value !== 'string' || value.length > limit || (required && !value) || /[\u0000-\u001f]/.test(value)) {
@@ -167,6 +189,13 @@ Deno.serve(async req => {
     try { values = JSON.parse(body); } catch { throw new Failure(400, 'Ungültige LifeCase-Anfrage.'); }
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Failure(400, 'Ungültige LifeCase-Anfrage.');
     const { action, provider } = values;
+    if (action === 'assistant-status' || action === 'assistant') {
+      const config = unwrap(await service.rpc('lifecase_assistant_access', { p_owner: user, p_charge: action === 'assistant' }));
+      if (action === 'assistant-status') return jsonify({ available: config?.available === true }, 200, headers);
+      if (!config?.available) throw new Failure(409, 'OpenAI ist für dieses LifeCase-Konto noch nicht aktiviert.');
+      if (config.limited) throw new Failure(429, 'Das Chatlimit für diese Stunde ist erreicht.');
+      return jsonify(await askStudio(req, config, values), 200, headers);
+    }
     if (action === 'status') return jsonify(await status(user), 200, headers);
     if (['push-public-key','push-subscribe','push-unsubscribe'].includes(action)) return jsonify(await managePush(service, user, action, values), 200, headers);
     if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
