@@ -6,6 +6,7 @@ const swissFormat = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Zurich'
 const swissDay = now => swissFormat.format(now);
 
 const purposes = ['answer', 'clarify', 'appointment', 'task', 'lunch', 'agenda', 'chronicle', 'case_overview'];
+const appointmentTypes = ['', 'medical', 'psychology', 'psychiatry'];
 const taskKinds = ['Aufgabe', 'Frist', 'Wiedervorlage'];
 const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const date = /^\d{4}-\d{2}-\d{2}$/;
@@ -16,6 +17,8 @@ const properties = {
   action: { type: 'string', enum: purposes },
   reply: string, title: string, date: string, time: string, endTime: string, endDate: string, location: string,
   caseQuery: string, sourceQuote: string,
+  appointmentType: { type: 'string', enum: appointmentTypes },
+  appointmentProvider: string, appointmentGoal: string, appointmentExpected: string,
   knowledge: { type: 'string', enum: ['', 'reported', 'observed', 'unclear'] },
   taskKind: { type: 'string', enum: ['', ...taskKinds] }, duration: { type: 'integer' },
 };
@@ -24,12 +27,15 @@ const format = { type: 'json_schema', name: 'lifecase_intent', strict: true,
 const rules = [
   'Du bist der persönliche LifeCase-Assistent. Antworte kurz und natürlich auf Deutsch (Schweiz).',
   'In dieser Funktion kannst du eine einzelne Aktion vorschlagen: neuen Termin anlegen, neue Aufgabe speichern, Mittagspause suchen, einen Kalendertag anzeigen, Notiz in einem Dossier festhalten oder bisherige Dossier-Einträge anzeigen.',
-  'Wähle appointment oder task ausschliesslich bei einem eindeutigen Auftrag zur Erfassung. Verwende kurze sachliche Titel und trenne Ort und Zeitangaben.',
+  'Wähle appointment oder task bei einem eindeutigen Auftrag zur Erfassung. Im LifeCase-Chat gilt auch eine Aussage wie «habe pschologin am 1.1.2027» als Termin erfassen, wenn sie kein Beispiel, Zitat, Rückblick oder eine Frage ist. Verwende kurze Titel und trenne Ort und Zeitangaben.',
   'Nutze chronicle, wenn etwas als Notiz, Ereignis, Aufzeichnung oder Gespräch im Dossier dokumentiert werden soll. Erstelle einen kurzen neutralen Titel ohne erfundene Einzelheiten, Motive, Schlussfolgerungen oder Quellen. Wenn die Aussage fehlt oder unvollständig ist, verwende clarify.',
   'Für chronicle ist caseQuery der vom Nutzer genannte Dossiername ohne Füllwörter. Nenne dasselbe Dossier auch in caseQuery, wenn ein Termin oder eine Aufgabe ausdrücklich dort verknüpft werden soll. Nutze case_overview zum Anzeigen vorhandener Einträge eines genannten Dossiers.',
   'sourceQuote ist bei chronicle eine wortgetreue zusammenhängende Passage, die den ganzen Sachverhalt aus einer Benutzernachricht enthält. Lasse Anweisungen zum Speichern weg und ändere keine Wörter, Grossschreibung oder Satzzeichen. Erfinde keine Aussagen oder Ursachen einzelner Personen.',
   'Bei «ich habe heute gehört» oder erkennbar weitergegebenen Informationen ist knowledge=reported. Bei ausdrücklicher eigener Wahrnehmung observed, sonst unclear. Formuliere auch im Titel mit erkennbarer Unsicherheit, etwa «Gehörte Aussage zur Schichtplanung». Das Datum bei Hörensagen bezeichnet, wann der Nutzer davon erfuhr. Falls ungenannt, verwende heute. Eine nur erwähnte Person ist nicht automatisch die Informationsquelle.',
-  'Für Termine brauchst du Titel, konkretes Datum und Startzeit. Frage bei fehlenden oder widersprüchlichen Angaben gezielt nach (clarify).',
+  'Für Termine brauchst du Titel und konkretes Datum. Bei den meisten Terminen ist die Startzeit nötig. Nur bei einem Arzttermin, psychologischen oder psychiatrischen Gespräch oder einem Termin bei einer ausdrücklich genannten Gesundheitseinrichtung darf time leer sein. Dann zeigt die App einen Entwurf mit Zeiteingabe. Erfinde keine Uhrzeit.',
+  'Für Gesundheitstermine nutze appointmentType medical, psychology oder psychiatry. Verstehe auch Tippfehler wie «pschologin». Bei einer unspezifischen Abkürzung wie PDAG lasse appointmentType leer, wenn die Art nicht klar ist. appointmentProvider ist der ausdrücklich genannte Name der Einrichtung oder Praxis; trenne ihn von location (nur ausdrücklich genannter Ort oder Adresse). Leite aus einem Namen keine Adresse ab. Verwende sonst leere Strings.',
+  'Für diese Gesundheitstermine darfst du ein ausdrücklich genanntes persönliches Ziel in appointmentGoal und ein ausdrücklich erwartetes Ergebnis oder Dokument in appointmentExpected eintragen. Erfinde keine Ziele oder Diagnosen. Verwende sonst leere Strings.',
+  'Wenn im Verlauf ein Entwurf für einen noch nicht gespeicherten Termin steht, übernimm seine Angaben bei einer klaren Korrektur oder Ergänzung zu diesem Termin und ändere nur die genannten Felder. «Um 16», «stattdessen an der ...» oder «ich brauche ein Arztzeugnis» ergänzen einen aktiven Entwurf, wenn der Bezug klar ist. Stelle Rückfragen, falls die Änderung unklar ist. Einen neuen Termin behandelst du unabhängig davon.',
   'Nutze bei «am selben Tag» den letzten bestätigten Termin. Ein explizites Datum hat Vorrang. Übernimm bei einer Antwort auf eine Rückfrage den ursprünglichen Betreff.',
   'Ein Tag wird als YYYY-MM-DD und eine Uhrzeit als HH:MM angegeben. Rechne eine ausdrücklich genannte Dauer in eine Endzeit um. Nur bei einem Ende nach Mitternacht ist endDate gesetzt.',
   'Eine einfache Aufgabe darf undatiert sein. Für Fristen und Wiedervorlagen ist ein Datum nötig.',
@@ -51,6 +57,13 @@ function messagesOf(values) {
         !item.content.trim() || item.content.length > 600) throw new AssistantFailure(400, 'Der Chatverlauf konnte nicht verarbeitet werden.');
     return { role: item.role, content: item.content.trim() };
   });
+}
+
+const words = text => text.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+  .replace(/ß/g, 'ss').replace(/[^\p{L}\d]+/gu, ' ').trim();
+function includesPhrase(text, phrase) {
+  const needle = words(phrase);
+  return needle && (' ' + words(text) + ' ').includes(' ' + needle + ' ');
 }
 
 export function assistantIntent(result, now = new Date(), messages = []) {
@@ -89,10 +102,19 @@ export function assistantIntent(result, now = new Date(), messages = []) {
     if (!taskKinds.includes(taskKind)) throw badAnswer();
     return { action, ...link, fields: { title, date: day, time, kind: taskKind, reminderDays: day ? '0' : '', status: 'Offen' } };
   }
-  if (!clock.test(time) || (day === today && time < timeFormat.format(now)) ||
+  const appointmentType = appointmentTypes.includes(result.appointmentType) ? result.appointmentType : '';
+  const provider = result.appointmentProvider.trim().slice(0, 100);
+  const mentioned = (phrase) => phrase && messages.some(item => item.role === 'user' && includesPhrase(item.content, phrase));
+  const appointmentProvider = mentioned(provider) ? provider : '';
+  const care = Boolean(appointmentType || appointmentProvider);
+  if ((!time && (!care || endTime || endDate)) || (time && day === today && time < timeFormat.format(now)) ||
       (endTime && (!clock.test(endTime) || (!endDate && endTime <= time))) ||
       (endDate && (!endTime || !realDay(endDate) || Date.parse(endDate) - Date.parse(day) !== 86400000))) throw badAnswer();
-  return { action, ...link, fields: { title, date: day, time, endTime, endDate, location: result.location.trim().slice(0, 250) } };
+  const location = result.location.trim().slice(0, 250);
+  return { action, ...link, fields: { title, date: day, time, endTime, endDate, location: !care || mentioned(location) ? location : '',
+    ...(care ? { appointmentType, appointmentProvider,
+      appointmentGoal: result.appointmentGoal.trim().slice(0, 250), appointmentExpected: result.appointmentExpected.trim().slice(0, 250) } : {}),
+  } };
 }
 
 const badAnswer = () => new AssistantFailure(422, 'Ich konnte die Angaben nicht eindeutig prüfen. Ergänze bitte, was du festhalten oder planen willst.');

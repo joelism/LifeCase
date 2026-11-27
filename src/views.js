@@ -1,3 +1,4 @@
+import { appointmentCheckIns, checkInQuestion } from './appointment-care.js';
 import { calendarRecordTitle } from './calendar-assistant.js';
 import { displayedAgenda, providers } from './connected-model.js';
 import { findLunchSlot } from './lunch.js';
@@ -27,7 +28,8 @@ const navButton = (label, view, compact = false) => '<button class="' + (compact
   esc(compact ? ({ Übersicht: 'Heute', 'Meine Woche': 'Woche' })[label] ?? label : label) + '</button>';
 
 export function shell(view, inner, state) {
-  const reminders = calendarEntries(state.rows).filter(item => reminderDue(item, today())).length;
+  const reminders = calendarEntries(state.rows).filter(item => reminderDue(item, today())).length +
+    appointmentCheckIns(state.rows).length;
   const name = profileName(state.session?.user);
   const avatar = '<span class="profile-mark" aria-hidden="true">' + (name ? esc(profileInitials(name)) : icon('people', 17)) + '</span>';
   return '<div class="layout' + (state.menu ? ' menu-open' : '') + '"><button type="button" class="scrim" data-menu="" aria-label="Menü schliessen"></button>' +
@@ -105,6 +107,17 @@ function shortcut(symbol, label, action, target) {
     icon(symbol, 19) + '</span><span>' + esc(label) + '</span>' + icon('right', 14) + '</button>';
 }
 
+export function checkInPanel(rows, limit = rows.length) {
+  if (!rows.length) return '';
+  return panel('Nach dem Termin', rows.slice(0, limit).map(row =>
+    '<button type="button" class="row care-row" data-care-check-in="' + esc(row.id) + '">' +
+    '<span class="tile-icon">' + icon('chat', 18) + '</span><span class="row-info"><strong class="row-title">' +
+    esc(checkInQuestion(row)) + '</strong><small class="row-sub">' +
+    esc([nameOf(row), value(row, 'appointmentExpected')].filter(Boolean).join(' · ')) +
+    '</small></span><span class="row-tail">' + icon('right', 15) + '</span></button>').join(''),
+  rows.length > limit ? jump('Alle Rückfragen', 'view', 'Erinnerungen') : '');
+}
+
 export function dashboard(rows, loading, connected, { name = '', suggestions = 0, briefing = '' } = {}) {
   const day = today();
   const active = rows.filter(isActive);
@@ -142,7 +155,7 @@ export function dashboard(rows, loading, connected, { name = '', suggestions = 0
   return '<header class="day-welcome"><div><span class="day-date">' + esc(labels.format(new Date())) +
     '</span><h1>' + esc(greeting) + '</h1></div>' +
     button('Meine Woche', 'view', 'Meine Woche', 'week', 'day-week') + '</header>' + externalStatus(connected) +
-    '<div class="dashboard-flow">' + briefing + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
+    '<div class="dashboard-flow">' + checkInPanel(appointmentCheckIns(active), 2) + briefing + todayPanel + lunchNudge + '<nav class="dash-shortcuts" aria-label="Schnellzugriff">' +
     shortcut('plus', 'Eintrag erfassen', 'quick', '') + shortcut('chat', 'Assistent', 'assistant', '') +
     shortcut('camera', 'Dokument scannen', 'scan-start', 'document') + shortcut('mail', 'Posteingang', 'view', 'Posteingang') +
     '</nav>' + (urgent ? glance : '') + upcomingPanel + (urgent ? '' : glance) + '</div>';

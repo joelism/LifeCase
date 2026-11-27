@@ -1,9 +1,11 @@
+import { appointmentQuestion, careIdentity, suggestAppointment } from './appointment-care.js';
+import { openAppointmentDraft, readAppointmentDraft } from './appointment-dialogs.js';
 import { assistantChronicleFields, dossierEntries, findAssistantDossier } from './assistant-dossiers.js';
 import { archive, records, saveIntakeRecord, saveRecord, message, userError } from './backend.js';
 import { connection } from './connections-api.js';
 import { calendarRecordTitle, duplicateAppointment, interpretAppointment, interpretTask } from './calendar-assistant.js';
 import { displayedAgenda, expandEvents, providers } from './connected-model.js';
-import { openDialog } from './editor.js';
+import { errorAt, openDialog } from './editor.js';
 import { icon } from './icons.js';
 import { findLunchSlot, lunchRequest, lunchSlotIsFree } from './lunch.js';
 import { lunchLabel, shiftWorkdays } from './workday.js';
@@ -35,8 +37,9 @@ export function makeAssistant(ctx, currentAccounts) {
   let aiAvailable = null;
   let aiHistory = [];
   let pendingCase = null;
+  let pendingAppointment = null;
   const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; }
+  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; aiHistory = []; pendingCase = null; pendingAppointment = null; }
 
   async function agendaFor(date, strict = false) {
     const latest = currentAccounts() ?? (await connection('status').catch(() => ({}))).accounts;
@@ -121,8 +124,52 @@ export function makeAssistant(ctx, currentAccounts) {
     const result = interpretAppointment(text, draft, new Date(), lastDate);
     draft = result.draft;
     if (result.status !== 'ready') { add('assistant', prompts[result.status]); return; }
-    await storeAppointment(result.draft, epoch);
+    await beginAppointment(result.draft, epoch);
   }
+  async function beginAppointment(fields, epoch, dossier = null) {
+    const { type, provider } = careIdentity(fields);
+    if (!type && !provider) {
+      await storeAppointment(fields, epoch, dossier);
+      if (epoch === ctx.epoch()) pendingAppointment = null;
+      return;
+    }
+    const source = await records();
+    if (epoch !== ctx.epoch()) return;
+    pendingAppointment = { ...suggestAppointment(fields, source), original: fields, dossier };
+    add('assistant', appointmentQuestion(pendingAppointment, ctx.name?.()) +
+      (fields.time ? '' : '\nUm welche Uhrzeit beginnt der Termin?'));
+    draft = null;
+  }
+
+  function reviewAppointment() {
+    if (!pendingAppointment || busy) return;
+    const appointment = pendingAppointment;
+    const form = openAppointmentDraft(appointment);
+    form.querySelector('[data-care-back]').addEventListener('click', () => open());
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      if (busy || pendingAppointment !== appointment) return;
+      const epoch = ctx.epoch();
+      const controls = [...form.querySelectorAll('button, input, select')];
+      let completed = false;
+      busy = true;
+      try {
+        const candidate = readAppointmentDraft(form, appointment.fields);
+        controls.forEach(control => { control.disabled = true; });
+        await storeAppointment(candidate, epoch, appointment.dossier);
+        if (epoch !== ctx.epoch()) return;
+        pendingAppointment = null;
+        completed = true;
+      } catch (error) {
+        if (epoch === ctx.epoch()) errorAt(form, error);
+      } finally {
+        if (epoch === ctx.epoch()) busy = false;
+        controls.forEach(control => { control.disabled = false; });
+        if (completed && form.isConnected && epoch === ctx.epoch()) open();
+      }
+    });
+  }
+
   async function storeAppointment(candidate, epoch, dossier = null) {
     const known = await agendaFor(candidate.date);
     if (epoch !== ctx.epoch()) return;
@@ -150,6 +197,8 @@ export function makeAssistant(ctx, currentAccounts) {
     lastDate = candidate.date;
     const end = candidate.endTime ? '–' + (candidate.endDate ? showDate(candidate.endDate) + ' ' : '') + candidate.endTime : '';
     let reply = '«' + nameOf(saved) + '» eingetragen.\n' + showDate(candidate.date) + ' · ' + candidate.time + end + ' Uhr.';
+    if (candidate.location && candidate.appointmentCheckIn) reply += '\n' + candidate.location + '.';
+    if (value(saved, 'appointmentCheckIn') === 'pending') reply += '\nIch frage nach dem Termin nochmals nach.';
     if (dossier) reply += '\nDossier «' + nameOf(dossier) + '».';
     if (spacing === 'Knapp') reply += ' Ein anderer Termin liegt knapp daneben.';
     if (spacing === 'Überschneidung') reply += ' Der Termin überschneidet sich mit einem anderen Eintrag.';
@@ -174,13 +223,19 @@ export function makeAssistant(ctx, currentAccounts) {
     draft = null;
   }
   async function useOpenAI(text, epoch) {
-    const messages = [...aiHistory, { role: 'user', content: text }].slice(-8);
+    const draft = pendingAppointment?.original;
+    const context = draft ? [{ role: 'assistant', content: ('Offener Entwurf (noch nicht gespeichert): ' +
+      [draft.title, draft.date, draft.time, draft.appointmentProvider, draft.location, draft.appointmentGoal, draft.appointmentExpected]
+        .filter(Boolean).join(' · ')).slice(0, 600) }] : [];
+    const userMessage = { role: 'user', content: text };
+    const history = [...aiHistory, userMessage].slice(-7);
+    const messages = [...aiHistory, ...context, userMessage].slice(-8);
     const result = await connection('assistant', { messages, lastDate });
     if (epoch !== ctx.epoch()) return;
-    aiHistory = messages.slice(-7);
+    aiHistory = history;
     if (result.action === 'chronicle' || result.action === 'case_overview' ||
         (result.caseQuery && ['appointment', 'task'].includes(result.action))) return resolveDossier(result, epoch);
-    if (result.action === 'appointment') return storeAppointment(result.fields, epoch);
+    if (result.action === 'appointment') return beginAppointment(result.fields, epoch);
     if (result.action === 'task') return addTask({ status: 'ready', fields: result.fields }, epoch);
     if (result.action === 'lunch') return suggestLunch(result, epoch);
     if (result.action === 'agenda') return showAgenda(result.date, epoch);
@@ -240,7 +295,7 @@ export function makeAssistant(ctx, currentAccounts) {
       add('assistant', '«' + nameOf(saved) + '» ' + (saved.archived_at ? 'liegt im Archiv von' : 'steht in der Chronik von') +
         ' «' + nameOf(dossier) + '».\n' + showDate(fields.date) + ' · ' + fields.source, saved.id, 'Chronikeintrag öffnen');
     }
-    if (intent.action === 'appointment') await storeAppointment({ ...intent.fields, caseIds: [dossier.id] }, epoch, dossier);
+    if (intent.action === 'appointment') await beginAppointment({ ...intent.fields, caseIds: [dossier.id] }, epoch, dossier);
     if (intent.action === 'task') await addTask({ status: 'ready', fields: { ...intent.fields, caseIds: [dossier.id] } }, epoch, dossier);
     if (epoch === ctx.epoch()) pendingCase = null;
   }
@@ -274,7 +329,11 @@ export function makeAssistant(ctx, currentAccounts) {
       (pendingCase.mayCreate ?
         button('Dossier «' + pendingCase.intent.caseQuery + '» anlegen', 'assistant-case', 'new', 'plus') : '') +
       button('Abbrechen', 'assistant-case', 'cancel') + '</div>' : '';
-    return '<p class="hint assistant-running">' + status + '</p>' + messages + caseControls +
+    const appointmentControls = !busy && pendingAppointment && !pendingCase ?
+      '<div class="assistant-tools"><div class="actions">' +
+      button('Termin prüfen', 'care-review', '', 'calendar', 'primary') + button('Entwurf verwerfen', 'care-discard') +
+      '</div></div>' : '';
+    return '<p class="hint assistant-running">' + status + '</p>' + messages + caseControls + appointmentControls +
       (!busy ? controls : '<p class="hint assistant-running" role="status">Einen Moment …</p>');
   }
   function open(autoLunch = false) {
@@ -343,6 +402,14 @@ export function makeAssistant(ctx, currentAccounts) {
         else run(epoch => chooseDossier(id, epoch));
         return;
       }
+      if (control?.hasAttribute('data-care-review')) { reviewAppointment(); return; }
+      if (control?.hasAttribute('data-care-discard')) {
+        pendingAppointment = null;
+        aiHistory = [];
+        add('assistant', 'Entwurf verworfen.');
+        draw();
+        return;
+      }
       if (control?.hasAttribute('data-lunch-confirm')) { add('user', 'Ja, bitte'); run(blockLunch); }
       if (control?.hasAttribute('data-lunch-cancel')) cancel();
       if (control?.hasAttribute('data-lunch-other')) run(alternative);
@@ -360,6 +427,7 @@ export function makeAssistant(ctx, currentAccounts) {
       if (proposal && isNo(text)) return cancel();
       if (proposal && /^(?:andere zeit|später)[.! ]*$/i.test(text)) return run(alternative);
       proposal = null;
+      if (pendingAppointment && isYes(text)) { reviewAppointment(); return; }
       if (aiAvailable) {
         if (pendingCase && isNo(text)) { pendingCase = null; add('assistant', 'Auswahl abgebrochen.'); draw(); return; }
         const picked = pendingCase && findAssistantDossier(pendingCase.choices, text).match;

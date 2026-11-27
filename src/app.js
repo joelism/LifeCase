@@ -1,3 +1,5 @@
+import { appointmentCheckIns } from './appointment-care.js';
+import { openAppointmentCheckIn } from './appointment-dialogs.js';
 import { briefingSnapshot, makeDailyBriefing } from './daily-briefing.js';
 import { makePlanner } from './planner.js';
 import { preparationForRow } from './planning.js';
@@ -16,7 +18,7 @@ import { calendarEntries, nameOf, recordSections, reminderDue, sectionOf, sectio
 import { lunchLabel, shiftWorkdays } from './workday.js';
 import { cleanDisplayName, profileName, profileUpdate } from './profile.js';
 import { button, empty, esc } from './ui.js';
-import { brand, calendarPage, dashboard, exportCandidates, exportControls, exportKinds, exportList, heading, panel, recordRow, searchControls, searchResults, sectionPage, selectedCalendar, shell } from './views.js';
+import { brand, calendarPage, checkInPanel, dashboard, exportCandidates, exportControls, exportKinds, exportList, heading, panel, recordRow, searchControls, searchResults, sectionPage, selectedCalendar, shell } from './views.js';
 
 const app = document.querySelector('#app');
 const notice = document.querySelector('#notice');
@@ -35,7 +37,7 @@ const ctx = {
   canPrepare: row => Boolean(preparationForRow(row)), openPreparation: row => planner.openSaved(row),
   weekStart: () => planner.state.start, externalEvents: () => connected.state.events,
   accountsLoaded: () => drive.activate(), refreshCalendar: () => connected.agenda(true), calendar: () => state.calendar, view: () => state.view, go, showCalendarDate, render,
-  rows: () => state.rows, files: () => state.files, epoch: () => state.epoch,
+  rows: () => state.rows, files: () => state.files, name: () => profileName(state.session?.user), epoch: () => state.epoch,
   addRecord: row => { ++syncVersion; state.loading = false; state.rows = [row, ...state.rows.filter(item => item.id !== row.id)]; render(); },
   addFile: file => { ++syncVersion; state.loading = false; state.files = [file, ...state.files.filter(item => item.id !== file.id)]; },
   notify, sync,
@@ -402,7 +404,7 @@ function reminderPage() {
   const canPush = pushSupported();
   const pushAction = canPush ? button(devicePush ? 'Push auf diesem Gerät deaktivieren' : 'Push auf diesem Gerät aktivieren',
     devicePush ? 'push-disable' : 'push-enable', '', 'bell', devicePush ? '' : 'primary') : '';
-  return heading('Erinnerungen', dateAction) + panel('Jetzt fällig', due.length ? due.map(item => recordRow(item.row, '', item)).join('') :
+  return heading('Erinnerungen', dateAction) + checkInPanel(appointmentCheckIns(state.rows)) + panel('Jetzt fällig', due.length ? due.map(item => recordRow(item.row, '', item)).join('') :
     empty('bell', 'Keine fälligen Erinnerungen')) +
     panel('Auf diesem Gerät', '<div class="panel-body settings-content"><p>' + (canPush ?
       'LifeCase meldet den Ablauf von Rezepten und Arztzeugnissen einen Kalendermonat vorher. Die Push-Nachricht zeigt keine Gesundheitsdetails.' :
@@ -493,6 +495,7 @@ document.addEventListener('click', async event => {
     render();
     (state.menu ? app.querySelector('.sidebar button') : app.querySelector('.bottom-nav [data-menu]'))?.focus();
   } else if ('quick' in action) quick();
+  else if ('careCheckIn' in action) openAppointmentCheckIn(action.careCheckIn, ctx);
   else if ('assistant' in action || 'assistantLunch' in action) assistant.open('assistantLunch' in action);
   else if ('pushEnable' in action || 'pushDisable' in action) await changePush(target, 'pushEnable' in action);
   else if ('workday' in action) {

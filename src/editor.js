@@ -1,3 +1,4 @@
+import { checkInDue } from './appointment-care.js';
 import { calendarRecordTitle, legacyChatAppointment } from './calendar-assistant.js';
 import { icon } from './icons.js';
 import { button, empty, esc, options, tag } from './ui.js';
@@ -190,11 +191,20 @@ export function openRecord(id, ctx) {
     (actionable ? button('Kalenderdatei', 'ics', id, 'calendar') : '');
   const tools = isAppointment ? '<div class="actions">' + plan + followUp + '</div><details class="record-extra"><summary>Weitere Aktionen</summary><div class="actions">' +
     exports + '</div></details>' : '<div class="actions">' + plan + followUp + exports + '</div>';
+  const care = isAppointment ? [
+    ['Einrichtung', value(row, 'appointmentProvider')],
+    ['Dein Ziel', value(row, 'appointmentGoal')],
+    ['Erwartetes Ergebnis', value(row, 'appointmentExpected')],
+    ['Nachbereitung', value(row, 'appointmentReviewNotes')],
+  ].filter(([, content]) => content).map(([label, content]) =>
+    '<div class="wide"><dt>' + esc(label) + '</dt><dd>' + esc(content) + '</dd></div>').join('') : '';
+  const checkIn = isAppointment && checkInDue(row) ?
+    '<div class="actions">' + button('Rückfrage beantworten', 'care-check-in', id, 'chat', 'primary') + '</div>' : '';
   const chatOriginal = section === 'Chronik' && value(row, 'chatOriginal');
   const originalMessage = chatOriginal ? '<details class="record-extra"><summary>Eigene Chat-Nachricht</summary><p class="mail-content">' +
     esc(chatOriginal) + '</p></details>' : '';
   const output = '<div class="actions">' + tag(section) + (arch ? tag('Archiviert', 'amber') : '') +
-    '<small>Aktualisiert am ' + esc(showTimestamp(row.updated_at || row.created_at)) + '</small></div><dl class="detail">' + fields + old + '</dl>' +
+    '<small>Aktualisiert am ' + esc(showTimestamp(row.updated_at || row.created_at)) + '</small></div><dl class="detail">' + fields + care + old + '</dl>' + checkIn +
     (linked.length ? '<section><h3 class="subheading">Zugehörige Einträge</h3>' + chips(linked.map(item => item.id), rows) + '</section>' : '') +
     attachments + original + originalMessage + tools + errorBox;
   openDialog(calendarRecordTitle(row), output, button(arch ? 'Wiederherstellen' : 'Archivieren', 'archive-record', id, 'archive') + edit);

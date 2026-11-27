@@ -366,6 +366,9 @@ dialog:has(.assistant-thread) .dialog-body{min-height:0;grid-template-rows:minma
 
 .lunch-nudge{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:11px;margin:0 0 14px;padding:11px 15px}
 .lunch-nudge p{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+.care-form{display:grid;gap:12px;min-width:0}
+.care-form .check{min-height:36px}
+.care-row .tile-icon{flex:none}
 .assistant-tools{display:grid;justify-items:start;gap:7px}
 .assistant-tools .button{min-height:36px;padding:5px 9px;font-size:12px}
 .assistant-running{margin:0 3px}

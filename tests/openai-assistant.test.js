@@ -4,7 +4,7 @@ import { assistantChronicleFields, dossierEntries, findAssistantDossier } from '
 import { askAssistant, assistantIntent } from '../supabase/functions/lifecase-connect/assistant.js';
 
 const now = new Date('2026-11-27T18:00:00Z');
-const blank = { action: 'answer', reply: '', title: '', date: '', time: '', endTime: '', endDate: '', location: '', taskKind: '', duration: 0, caseQuery: '', sourceQuote: '', knowledge: '' };
+const blank = { action: 'answer', reply: '', title: '', date: '', time: '', endTime: '', endDate: '', location: '', taskKind: '', appointmentType: '', appointmentProvider: '', appointmentGoal: '', appointmentExpected: '', duration: 0, caseQuery: '', sourceQuote: '', knowledge: '' };
 const sample = { ...blank, action: 'appointment', title: 'Termin bei der Psychologin',
   date: '2026-11-30', time: '16:00', endTime: '17:00', location: 'Beispielklinik' };
 const messages = [{ role: 'user', content: 'Termin bei der Psychologin am selben Tag um 16 Uhr, dauert eine Stunde' }];
@@ -118,4 +118,19 @@ test('the proactive briefing sends only allowlisted counts and times and uses re
       return completed(JSON.stringify({ text:'Morgen steht um 10:00 dein erster Termin an.', help:'prepare' }));
     } });
   assert.deepEqual(result, { action:'briefing', text:'Morgen steht um 10:00 dein erster Termin an.', help:'prepare' });
+});
+
+test('a medical appointment with no start time stays a draft and a model-suggested address is discarded', () => {
+  const user = [{ role: 'user', content: 'habe pschologin bei PDAG am 1.1.2027' }];
+  const model = { ...blank, action: 'appointment', title: 'Psychologisches Gespräch', date: '2027-01-01',
+    appointmentType: 'psychology', appointmentProvider: 'PDAG', location: 'Beispielstrasse 99, Aarau' };
+  const result = assistantIntent(model, now, user);
+  assert.equal(result.fields.time, '');
+  assert.equal(result.fields.appointmentType, 'psychology');
+  assert.equal(result.fields.appointmentProvider, 'PDAG');
+  assert.equal(result.fields.location, '');
+  const correction = { role: 'user', content: 'Es ist an der Beispielstrasse 99 in Aarau, Beginn 16 Uhr.' };
+  const changed = assistantIntent({ ...model, time: '16:00', location: 'Beispielstrasse 99' }, now, [...user, correction]);
+  assert.equal(changed.fields.location, 'Beispielstrasse 99');
+  assert.throws(() => assistantIntent({ ...model, appointmentType: '', appointmentProvider: '' }, now, user), { status: 422 });
 });
