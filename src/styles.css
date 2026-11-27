@@ -220,6 +220,9 @@ dialog[open]{animation:enter .2s ease-out}
 .connection-guide summary,.health-history summary{cursor:pointer;color:var(--accent);font-weight:650}
 .connection-guide p,.connection-guide code{display:block;margin-top:8px}
 .connection-guide code{font-size:11px}
+.connection-steps{display:grid;gap:12px;margin-top:12px;padding-inline-start:22px;color:var(--muted)}
+.connection-steps li>.actions{margin-top:6px}
+.connection-steps li code{display:inline;font-size:inherit}
 .mailbox-sources{margin-bottom:13px}
 .mail-row .row-title,.external-row .row-title{overflow-wrap:anywhere}
 .mail-more{display:flex;justify-content:center;margin-top:12px}

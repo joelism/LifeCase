@@ -275,6 +275,21 @@ export function makeConnections(ctx) {
       location.assign(url);
     } catch (error) { ctx.notify(message(error)); }
   }
+  async function copyOutlookCallback() {
+    const callback = state.callback;
+    if (!callback) return;
+    const epoch = ctx.epoch();
+    try {
+      await navigator.clipboard.writeText(callback);
+      if (epoch === ctx.epoch()) ctx.notify('Rücksprungadresse kopiert.');
+    } catch {
+      if (epoch !== ctx.epoch()) return;
+      const field = openDialog('Rücksprungadresse kopieren', '<label class="input-wrap">Rücksprungadresse für Microsoft Entra' +
+        '<textarea readonly rows="3">' + esc(callback) + '</textarea></label>', button('Schliessen', 'close')).querySelector('textarea');
+      field.focus();
+      field.select();
+    }
+  }
   function openEvent(key) {
     const entry = state.events.find(item => item.provider + '|' + item.id + '|' + item.date === key);
     if (!entry) return;
@@ -361,6 +376,7 @@ export function makeConnections(ctx) {
   }
   function handleClick(data) {
     if ('integrationRefresh' in data) status(true);
+    else if ('copyOutlookCallback' in data) copyOutlookCallback();
     else if ('connect' in data) connect(data.connect);
     else if ('connectCalendarWrite' in data) connect(data.connectCalendarWrite, true);
     else if ('disconnect' in data) disconnect(data.disconnect);

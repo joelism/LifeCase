@@ -8,6 +8,22 @@ import { heading, panel } from './views.js';
 const providerBadge = key => '<span class="provider-mark ' + key + '" aria-hidden="true">' + (providers[key]?.mark ?? icon('mail', 18)) + '</span>';
 const note = text => '<p class="hint">' + esc(text) + '</p>';
 
+function outlookSetup(callback) {
+  return '<p>Outlook braucht eine einmalige Einrichtung. Danach kannst du dein Konto hier verbinden.</p>' +
+    '<details class="connection-guide"><summary>Outlook einrichten</summary>' +
+    '<ol class="connection-steps">' +
+    '<li>Öffne Microsoft Entra und wähle <strong>App-Registrierungen → Neue Registrierung</strong>.' +
+    '<div class="actions"><a class="button" href="https://entra.microsoft.com/" target="_blank" rel="noopener noreferrer">' +
+    icon('arrow', 16) + 'Microsoft Entra öffnen</a></div></li>' +
+    '<li>Gib <strong>LifeCase</strong> als Namen ein und wähle <strong>Nur persönliche Microsoft-Konten</strong>. ' +
+    'Wähle <strong>Web</strong> und füge die Rücksprungadresse ein.' +
+    (callback ? '<div class="actions">' + button('Rücksprungadresse kopieren', 'copy-outlook-callback') + '</div>' : '') + '</li>' +
+    '<li>Erstelle unter <strong>Zertifikate und Geheimnisse</strong> einen geheimen Clientschlüssel. ' +
+    'Hinterlege die App-ID und den Schlüsselwert im privaten Supabase Vault als <code>lifecase_microsoft_client_id</code> ' +
+    'und <code>lifecase_microsoft_client_secret</code>. Wähle hier anschliessend <strong>Status prüfen</strong>.</li>' +
+    '</ol></details>';
+}
+
 export function connectionsView(state) {
   const cards = Object.entries(providers).map(([key, provider]) => {
     const current = state.accounts?.[key];
@@ -17,11 +33,13 @@ export function connectionsView(state) {
         button('Posteingang öffnen', 'mail-provider', key, 'mail', 'primary') +
         (current.calendarWrite ? tag('Kalender-Schreibzugriff', 'positive') : current.available ? button('Pausen im Kalender erlauben', 'connect-calendar-write', key, 'calendar') : '') +
         button('Trennen', 'disconnect', key, '', 'danger') + '</div>' :
-        current?.available ? '<p>Termine im Kalender anzeigen und einzelne Nachrichten deinen Dossiers zuordnen.</p>' + button('Verbinden', 'connect', key, 'link', 'primary') :
+        current?.available ? '<p>Termine im Kalender anzeigen und einzelne Nachrichten deinen Dossiers zuordnen.</p>' +
+          button(key === 'microsoft' ? 'Outlook verbinden' : 'Verbinden', 'connect', key, 'link', 'primary') :
+        key === 'microsoft' ? (current ? outlookSetup(state.callback) :
+          '<p>' + (state.error ? 'Der Outlook-Status ist gerade nicht verfügbar.' : 'Verbindung wird geprüft …') + '</p>') :
         '<p>' + (state.statusLoading ? 'Verbindung wird geprüft …' : 'Die Anbieterregistrierung ist noch offen.') + '</p>' +
-        '<details class="connection-guide"><summary>Einrichtung anzeigen</summary><p>' + (key === 'microsoft'
-          ? 'Registriere LifeCase als Web-App in Microsoft Entra für persönliche Microsoft-Konten.'
-          : 'Registriere LifeCase als Webanwendung in Google Cloud und aktiviere Gmail API und Google Calendar API.') +
+        '<details class="connection-guide"><summary>Einrichtung anzeigen</summary><p>' +
+        'Registriere LifeCase als Webanwendung in Google Cloud und aktiviere Gmail API und Google Calendar API.' +
         '</p>' + (state.callback ? '<code>' + esc(state.callback) + '</code>' : '') + '</details>') + '</article>';
   }).join('');
   return heading('Verbindungen', button('Status prüfen', 'integration-refresh', '', 'refresh')) +
