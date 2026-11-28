@@ -44,11 +44,13 @@ const getGraph = (url, access, headers) => getJson(url, access, { Prefer: 'IdTyp
 const identity = value => encodeURIComponent(value);
 const decode = value => Uint8Array.from(atob(value.replace(/-/g, '+').replace(/_/g, '/')), letter => letter.charCodeAt(0));
 
-function scopeFor(provider, write) {
-  const scope = providers[provider].scope;
-  if (!write) return scope;
-  if (provider === 'google') return scope + ' https://www.googleapis.com/auth/calendar.events.owned';
-  return provider === 'microsoft' ? scope.replace('/Calendars.Read', '/Calendars.ReadWrite') : scope;
+function scopeFor(provider, write, drafts = false) {
+  let scope = providers[provider].scope;
+  if (drafts && provider === 'google') scope += ' https://www.googleapis.com/auth/gmail.compose';
+  if (drafts && provider === 'microsoft') scope = scope.replace('/Mail.Read', '/Mail.ReadWrite');
+  if (write && provider === 'google') scope += ' https://www.googleapis.com/auth/calendar.events.owned';
+  if (write && provider === 'microsoft') scope = scope.replace('/Calendars.Read', '/Calendars.ReadWrite');
+  return scope;
 }
 function hasWriteScope(provider, scope) {
   const scopes = String(scope || '').toLowerCase().split(/\s+/);
@@ -56,16 +58,16 @@ function hasWriteScope(provider, scope) {
     scopes.includes('https://www.googleapis.com/auth/calendar.events') || scopes.includes('https://www.googleapis.com/auth/calendar') :
     provider === 'microsoft' && scopes.some(item => item.split('/').at(-1) === 'calendars.readwrite');
 }
-export function authorizationUrl(provider, cfg, callback, state, challenge, write = false) {
+export function authorizationUrl(provider, cfg, callback, state, challenge, write = false, drafts = false) {
   return withQuery(providers[provider].authorize, {
-    client_id: cfg.client_id, redirect_uri: callback, response_type: 'code', scope: scopeFor(provider, write),
+    client_id: cfg.client_id, redirect_uri: callback, response_type: 'code', scope: scopeFor(provider, write, drafts),
     code_challenge: challenge, code_challenge_method: 'S256', state,
     ...(provider !== 'microsoft' ? { access_type: 'offline', prompt: 'consent select_account' } : { prompt: 'select_account' }),
   });
 }
-export async function exchange(provider, cfg, params, oldRefresh = '', write = false) {
+export async function exchange(provider, cfg, params, oldRefresh = '', write = false, drafts = false) {
   const requestFields = { client_id: cfg.client_id, client_secret: cfg.client_secret, ...params };
-  if (provider === 'microsoft') requestFields.scope = scopeFor(provider, write);
+  if (provider === 'microsoft') requestFields.scope = scopeFor(provider, write, drafts);
   const response = await request(providers[provider].token, {
     method: 'POST', body: new URLSearchParams(requestFields), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
   });
@@ -77,6 +79,9 @@ export async function exchange(provider, cfg, params, oldRefresh = '', write = f
   const refresh = data.refresh_token || oldRefresh;
   if (!data.access_token || !refresh) throw new Failure(403, 'Die Freigabe enthält keinen dauerhaften Kontozugriff.');
   return { access: data.access_token, refresh, expires: Date.now() + Number(data.expires_in || 3600) * 1000,
+    mailDrafts: drafts && (data.scope ? data.scope.toLowerCase().split(/\s+/).some(scope => provider === 'google' ?
+      ['https://www.googleapis.com/auth/gmail.compose','https://www.googleapis.com/auth/gmail.modify','https://mail.google.com/'].includes(scope) :
+      scope.split('/').at(-1) === 'mail.readwrite') : params.grant_type === 'refresh_token'),
     calendarWrite: write && (data.scope ? hasWriteScope(provider, data.scope) : params.grant_type === 'refresh_token') };
 }
 export async function profile(provider, access) {
@@ -101,13 +106,13 @@ export async function revokeGoogle(token) {
 }
 const mimeHeader = (payload, header) => payload?.headers?.find(entry => entry.name.toLowerCase() === header)?.value || '';
 function googleMessage(row) {
-  return { id: row.id, subject: mimeHeader(row.payload, 'subject') || '(Ohne Betreff)', sender: mimeHeader(row.payload, 'from'),
+  return { id: row.id, replyAddress: mimeHeader(row.payload, 'reply-to') || mimeHeader(row.payload,'from'), subject: mimeHeader(row.payload, 'subject') || '(Ohne Betreff)', sender: mimeHeader(row.payload, 'from'),
     date: dateIso(Number(row.internalDate)), hasAttachments: Boolean(row.payload?.parts?.some(part => part.filename)) };
 }
-const msFields = 'id,subject,from,receivedDateTime,hasAttachments';
+const msFields = 'id,subject,from,replyTo,receivedDateTime,hasAttachments';
 function microsoftMessage(row) {
   const address = row.from?.emailAddress;
-  return { id: row.id, subject: row.subject || '(Ohne Betreff)', sender: [address?.name, address?.address].filter(Boolean).join(' · '),
+  return { id: row.id, replyAddress: row.replyTo?.length ? row.replyTo.map(item=>item.emailAddress?.address).join(', ') : address?.address || '', subject: row.subject || '(Ohne Betreff)', sender: [address?.name, address?.address].filter(Boolean).join(' · '),
     date: dateIso(row.receivedDateTime), hasAttachments: Boolean(row.hasAttachments) };
 }
 function microsoftSkip(url) {
@@ -116,22 +121,44 @@ function microsoftSkip(url) {
   if (point.origin !== 'https://graph.microsoft.com') return '';
   return point.searchParams.get('$skip') || point.searchParams.get('$skiptoken') || '';
 }
-export async function listMail(provider, access, query, cursor) {
+// UTC instant corresponding to 00:00 in Zurich. Both candidate offsets cover DST transitions.
+function boundary(day, next = false) {
+  const utc = Date.parse(day+'T00:00:00Z') + (next ? 86400000 : 0);
+  const hourly = new Date(utc - 3600000);
+  return local.format(hourly).endsWith('00:00') ? hourly : new Date(utc - 7200000);
+}
+
+export async function listMail(provider, access, query, cursor, from = '', through = '') {
   const count = 15;
   if (provider === 'google') {
-    const data = await getJson(withQuery(gmail + 'messages', { maxResults: count, labelIds: query ? '' : 'INBOX', q: query, pageToken: cursor }), access);
+    const q = [query, from && 'after:'+(boundary(from).getTime()/1000-1), through && 'before:'+boundary(through,true).getTime()/1000].filter(Boolean).join(' ');
+    const data = await getJson(withQuery(gmail + 'messages', { maxResults: count, labelIds: query ? '' : 'INBOX', q, pageToken: cursor }), access);
     const rows = await Promise.all((data.messages ?? []).map(({ id }) => getJson(withQuery(gmail + 'messages/' + identity(id), {
       format: 'metadata', fields: 'id,internalDate,payload(headers)',
     }), access)));
     return { rows: rows.map(googleMessage), next: data.nextPageToken || '' };
   }
   const base = graph + (query ? 'me/messages' : 'me/mailFolders/inbox/messages');
-  const filters = { $top: count, $select: msFields, $orderby: query ? '' : 'receivedDateTime desc',
-    $search: query ? '"' + query.replace(/["\\]/g, ' ') + '"' : '' };
-  if (cursor) filters[/^\d+$/.test(cursor) ? '$skip' : '$skiptoken'] = cursor;
-  const data = await getGraph(withQuery(base, filters), access);
-  const next = microsoftSkip(data['@odata.nextLink']);
-  return { rows: (data.value ?? []).map(microsoftMessage), next: next === cursor ? '' : next };
+  const range=[from && 'receivedDateTime ge '+boundary(from).toISOString(),through && 'receivedDateTime lt '+boundary(through,true).toISOString()].filter(Boolean).join(' and ');
+  const rangedSearch=Boolean(range && query);
+  const filters = { $top: rangedSearch ? 50 : count, $select: msFields+(rangedSearch?',bodyPreview':''), $orderby: !query || range ? 'receivedDateTime desc' : '',
+    $filter:range, $search: query && !range ? '"'+query.replace(/["\\]/g,' ')+'"' : '' };
+  const rows=[];
+  let next=cursor;
+  let pages=0;
+  do {
+    if (next) filters[/^\d+$/.test(next) ? '$skip' : '$skiptoken']=next;
+    const data=await getGraph(withQuery(base,filters),access);
+    const matches=(data.value ?? []).filter(row=>!rangedSearch || query.toLowerCase().split(/\s+/).every(term=>
+      [row.subject,row.from?.emailAddress?.name,row.from?.emailAddress?.address,row.bodyPreview].join(' ').toLowerCase().includes(term)));
+    rows.push(...matches.map(microsoftMessage));
+    const previous=next;
+    next=microsoftSkip(data['@odata.nextLink']);
+    if (previous===next) next='';
+    pages++;
+  } while (rangedSearch && next && rows.length<count && pages<4);
+  return {rows, next, partial:Boolean(rangedSearch && next)};
+
 }
 function textOnly(html) {
   return String(html ?? '').replace(/<(script|style|head)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
@@ -357,4 +384,51 @@ export async function createLunchBlock(provider, access, day, time, endTime, key
   }
   if (response.status === 401 || response.status === 403) throw new Failure(403, 'Die Kalender-Schreibfreigabe fehlt oder ist abgelaufen.');
   throw new Failure(502, 'Der Kalenderanbieter hat die Mittagspause nicht bestätigt.');
+}
+
+export async function createMailDraft(provider, access, { to, subject, body, replyId = '' }) {
+  if (!['google','microsoft'].includes(provider) || typeof replyId !== 'string' || replyId.length > 1024 || /[\u0000-\u001f]/.test(replyId) || typeof to !== 'string' || to.length > 254 ||
+      !/^[^\s<>@,;:]+@[^\s<>@,;:]+\.[^\s<>@,;:]+$/.test(to) || typeof subject !== 'string' ||
+      !subject.trim() || subject.length > 250 || /[\u0000-\u001f\u007f]/.test(subject + to) ||
+      typeof body !== 'string' || !body.trim() || body.length > 10000) {
+    throw new Failure(400, 'Prüfe Empfängeradresse, Betreff und Nachricht.');
+  }
+  const encode = text => btoa(Array.from(new TextEncoder().encode(text), byte => String.fromCharCode(byte)).join(''));
+  // Fold encoded words between Unicode code points, not within a UTF-8 sequence.
+  const words = Array.from(subject).reduce((parts, char) => {
+    if (new TextEncoder().encode(parts.at(-1) + char).length > 42) parts.push('');
+    parts[parts.length - 1] += char;
+    return parts;
+  }, ['']);
+  const google = provider === 'google';
+  const threadHeaders=[];
+  let threadId='';
+  if (replyId && google) {
+    const original=await getJson(withQuery(gmail+'messages/'+identity(replyId),{format:'metadata'}),access);
+    const msgId=mimeHeader(original.payload,'message-id').trim();
+    if (original.threadId && /^<[^<>\s]{1,220}>$/.test(msgId)) {
+      threadId=original.threadId;
+      const refs=(mimeHeader(original.payload,'references').match(/<[^<>\s]{1,220}>/g) || []).slice(-8);
+      threadHeaders.push('In-Reply-To: '+msgId,'References: '+[...refs,msgId].join('\r\n '));
+    }
+  }
+  const mime = [...threadHeaders,'To: ' + to, 'Subject: ' + words.map(part=>'=?UTF-8?B?' + encode(part) + '?=').join('\r\n '),
+    'MIME-Version: 1.0','Content-Type: text/plain; charset=UTF-8','Content-Transfer-Encoding: base64','',
+    encode(body).match(/.{1,76}/g).join('\r\n')].join('\r\n');
+  const draft = google ? { message: { ...(threadId ? {threadId} : {}), raw: encode(mime).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'') } } :
+    { subject, body: { contentType:'Text', content:body }, toRecipients:[{emailAddress:{address:to}}] };
+  const target=google ? gmail+'drafts' : graph+'me/messages'+(replyId ? '/'+identity(replyId)+'/createReply' : '');
+  const payload=!google && replyId ? {message:draft} : draft;
+  const response = await request(target, {
+    method:'POST', headers:{Authorization:'Bearer '+access,'Content-Type':'application/json'}, body:JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Failure(response.status === 403 ? 403 : 502, response.status === 403 ?
+      'Der Anbieter hat das Erstellen des Entwurfs abgelehnt. Prüfe die Freigabe unter Verbindungen.' :
+      'Der Anbieter hat den Entwurf nicht bestätigt. Prüfe den Entwurfsordner, bevor du es erneut versuchst.');
+  }
+  const data = await response.json();
+  if (!data?.id) throw new Failure(502, 'Prüfe den Entwurfsordner. Eine Bestätigung fehlt.');
+  return { saved:true };
 }

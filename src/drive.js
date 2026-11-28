@@ -136,5 +136,5 @@ export function makeDrive(ctx, accounts, updateAccounts) {
     state.rows = [];
     load();
   }
-  return { view, activate, reset, handle, submit };
+  return { view, activate, reset, handle, submit, importFile };
 }

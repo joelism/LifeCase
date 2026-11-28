@@ -1,3 +1,4 @@
+import { checkedCommand, workspaceRules, workspaceFormat, readingFormat, readingInstructions, mailPlanFormat, mailPlanRules } from './assistant-workspace.js';
 // This module also runs in the Charakterstudio worker, where the existing OpenAI key is held.
 export class AssistantFailure extends Error {
   constructor(status, message) { super(message); this.status = status; }
@@ -67,7 +68,7 @@ function messagesOf(values) {
       values.messages.at(-1)?.role !== 'user') throw new AssistantFailure(400, 'Schreib eine Nachricht im LifeCase-Chat.');
   return values.messages.map(item => {
     if (!['user', 'assistant'].includes(item?.role) || typeof item.content !== 'string' ||
-        !item.content.trim() || item.content.length > 600) throw new AssistantFailure(400, 'Der Chatverlauf konnte nicht verarbeitet werden.');
+        !item.content.trim() || item.content.length > (values.intentVersion === 3 ? 1800 : 600)) throw new AssistantFailure(400, 'Der Chatverlauf konnte nicht verarbeitet werden.');
     return { role: item.role, content: item.content.trim() };
   });
 }
@@ -227,7 +228,7 @@ async function modelResponse({ apiKey, input, instructions, outputFormat, transp
       method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(20000),
       headers: { Authorization: 'Bearer ' + apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gpt-5-mini', instructions, input, store: false,
-        reasoning: { effort: 'minimal' }, max_output_tokens: 1000, text: { format: outputFormat } }),
+        reasoning: { effort: 'minimal' }, max_output_tokens: outputFormat.name === 'lifecase_chat' || outputFormat.name === 'lifecase_reading' ? 2200 : 1000, text: { format: outputFormat } }),
     });
   } catch (error) {
     console.warn('LifeCase OpenAI transport:', error?.name || 'Error');
@@ -248,6 +249,26 @@ async function modelResponse({ apiKey, input, instructions, outputFormat, transp
 }
 
 export async function askAssistant({ apiKey, values, now = new Date(), transport = fetch }) {
+  if (values.reading) {
+    const { mode, request, source } = values.reading;
+    if (!['summary','reply','plan'].includes(mode) || typeof request !== 'string' || request.length > 2000 ||
+        typeof source !== 'string' || !source || source.length > 10000) throw badAnswer();
+    const result = await modelResponse({ apiKey, transport, input: JSON.stringify({mode,request,source}),
+      instructions: mode === 'plan' ? mailPlanRules : readingInstructions, outputFormat: mode === 'plan' ? mailPlanFormat : readingFormat });
+    if (mode === 'plan') {
+      if (!result || !['Termin','Aufgabe','Frist'].includes(result.kind)) throw badAnswer();
+      const fields = { kind:result.kind };
+      for (const key of ['title','date','time','endDate','endTime','location','notes']) {
+        if (typeof result[key] !== 'string') throw badAnswer();
+        fields[key] = result[key].trim().slice(0,key==='notes' ? 2000 : 250);
+      }
+      for (const key of ['date','endDate']) if (fields[key] && !realDay(fields[key])) fields[key]='';
+      for (const key of ['time','endTime']) if (fields[key] && !clock.test(fields[key])) fields[key]='';
+      return { action:'mail_plan', fields };
+    }
+    if (!result?.text?.trim()) throw badAnswer();
+    return { action:'reading', text:result.text.trim().slice(0,5000) };
+  }
   if (values.briefing) {
     const facts = briefingOf(values.briefing, now);
     const result = await modelResponse({ apiKey, input: JSON.stringify(facts),
@@ -258,13 +279,23 @@ export async function askAssistant({ apiKey, values, now = new Date(), transport
   }
   const messages = messagesOf(values);
   const lastDate = typeof values.lastDate === 'string' && realDay(values.lastDate) ? values.lastDate : '';
-  const sleepEnabled = values.intentVersion === 2;
+  const workspace = values.intentVersion === 3;
+  const sleepEnabled = workspace || values.intentVersion === 2;
   const sleepDate = typeof values.sleepDate === 'string' && realDay(values.sleepDate) ? values.sleepDate : '';
-  const instructions = rules + (sleepEnabled ? '\n' + dialogueRules : '') + '\nJetzt in Europe/Zurich: ' + dayFormat.format(now) + ', ' + swissDay(now) +
+  const base = workspace ? rules.split('\n').filter(line => !line.startsWith('In dieser Funktion') && !line.startsWith('Behaupte nie')).join('\n') : rules;
+  const instructions = base + (workspace ? '\n' + workspaceRules : '') + (sleepEnabled ? '\n' + dialogueRules : '') + '\nJetzt in Europe/Zurich: ' + dayFormat.format(now) + ', ' + swissDay(now) +
     ' um ' + timeFormat.format(now) + '. Letzter bestätigter Termin: ' + (lastDate || 'keiner') + '.' +
     (sleepEnabled ? ' Offene Schlaf-Rückfrage für: ' + (sleepDate || 'kein Datum') + '.' : '');
+  const routing = workspace ? '\nBei einer Änderung an einem vorhandenen Kalendereintrag immer zuerst record_edit ausführen. Die bestehende Startzeit, bisheriges Datum, genaue Zuordnung und fehlende Angaben werden von LifeCase beim Suchen und im Formular geklärt. Beispiel: «Verschiebe meinen Zahnarzttermin auf Montag um 15 Uhr» => record_edit, section Kalender, query Zahnarzt, pairs date und time. Nicht als neuen Termin erfassen oder vorher nach dem bisherigen Datum fragen. Für die Übernahme eines Termins aus einer Mail immer mail_plan.' : '';
   try {
-    const result = await modelResponse({ apiKey, input: messages, instructions, outputFormat: sleepEnabled ? chatFormat : format, transport });
+    const raw = await modelResponse({ apiKey, input: messages, instructions:instructions + routing,
+      outputFormat: workspace ? workspaceFormat(chatFormat) : sleepEnabled ? chatFormat : format, transport });
+    const result = workspace && raw ? raw.command : raw;
+    if (workspace && result?.operation) {
+      const checked = checkedCommand(result);
+      if (!checked) throw badAnswer();
+      return checked;
+    }
     return result ? assistantIntent(result, now, messages, sleepEnabled) : { action: 'answer', reply: 'Bei dieser Nachricht kann ich dir nicht helfen.' };
   } catch (error) {
     const latest = messages.at(-1).content;

@@ -32,6 +32,7 @@ export function connectionsView(state) {
       (current?.connected ? tag('Verbunden', 'positive') + '<p class="connection-address">' + esc(current.email) + '</p><div class="actions">' +
         button('Posteingang öffnen', 'mail-provider', key, 'mail', 'primary') +
         (current.calendarWrite ? tag('Kalender-Schreibzugriff', 'positive') : current.available ? button('Pausen im Kalender erlauben', 'connect-calendar-write', key, 'calendar') : '') +
+        (current.mailDrafts ? tag('E-Mail-Entwürfe erlaubt', 'positive') : button('E-Mail-Entwürfe erlauben', 'connect-mail-drafts', key, 'mail')) +
         button('Trennen', 'disconnect', key, '', 'danger') + '</div>' :
         current?.available ? '<p>Termine im Kalender anzeigen und einzelne Nachrichten deinen Dossiers zuordnen.</p>' +
           button(key === 'microsoft' ? 'Outlook verbinden' : 'Verbinden', 'connect', key, 'link', 'primary') :

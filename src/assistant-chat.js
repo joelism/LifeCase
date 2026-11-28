@@ -1,3 +1,4 @@
+import { makeWorkspace } from './assistant-workspace.js';
 import { appointmentQuestion, careIdentity, suggestAppointment } from './appointment-care.js';
 import { openAppointmentDraft, readAppointmentDraft } from './appointment-dialogs.js';
 import { assistantChronicleFields, dossierEntries, findAssistantDossier, reviewChronicleDossier } from './assistant-dossiers.js';
@@ -41,8 +42,9 @@ export function makeAssistant(ctx, currentAccounts) {
   let lastChronicleId = '';
   let pendingAppointment = null;
   let sleepEditingDay = '';
-  const add = (side, text, record = '', label = 'Eintrag ansehen') => { history = [...history.slice(-11), { side, text, record, label }]; };
-  function reset() { history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; sleepEditingDay = ''; }
+  const add = (side, text, record = '', label = 'Eintrag ansehen', modelText = '') => { history = [...history.slice(-11), { side, text, record, label, modelText }]; };
+  const workspace = makeWorkspace(ctx,add);
+  function reset() { workspace.reset(); history = []; draft = null; proposal = null; target = ''; busy = false; lastDate = ''; pendingMessage = ''; aiAvailable = null; pendingCase = null; pendingAppointment = null; lastChronicleId = ''; sleepEditingDay = ''; }
 
   function openSleepQuestion() {
     const sleep = ctx.sleepCheckIn();
@@ -262,11 +264,11 @@ export function makeAssistant(ctx, currentAccounts) {
     const context = draft ? [{ role: 'assistant', content: ('Offener Entwurf (noch nicht gespeichert): ' +
       [draft.title, draft.date, draft.time, draft.appointmentProvider, draft.location, draft.appointmentGoal, draft.appointmentExpected]
         .filter(Boolean).join(' · ')).slice(0, 600) }] : [];
-    const transcript = history.map(row => ({ role: row.side, content: row.text.slice(0, 600) }));
+    const transcript = history.map((row,i) => ({ role: row.side, content: (row.modelText || row.text).slice(0, i === history.length-1 ? 1800 : 600) }));
     const messages = [...transcript.slice(0, -1), ...context, transcript.at(-1)].slice(-8);
     let result;
     try {
-      result = await connection('assistant', { messages, lastDate, intentVersion: 2, sleepDate: question?.plan.morning });
+      result = await connection('assistant', { messages, lastDate, intentVersion: 3, sleepDate: question?.plan.morning });
     } catch (error) {
       if (epoch !== ctx.epoch()) return;
       if (fallback) return recordSleepReply(fallback, '', epoch, question);
@@ -277,6 +279,7 @@ export function makeAssistant(ctx, currentAccounts) {
       const answer = fallback ?? { date: result.date, wake: result.time };
       return recordSleepReply(answer, '', epoch, question);
     }
+    if (result.action === 'workspace') return workspace.execute(result, transcript.at(-1).content, epoch);
     if (result.action === 'chronicle' || result.action === 'case_overview' ||
         (result.caseQuery && ['appointment', 'task'].includes(result.action))) return resolveDossier(result, epoch);
     if (result.action === 'appointment') return beginAppointment(result.fields, epoch);
@@ -366,7 +369,7 @@ export function makeAssistant(ctx, currentAccounts) {
     const messages = history.length ? history.map(row => '<div class="assistant-bubble ' + row.side + '"><p>' + esc(row.text) + '</p>' +
       (row.record ? button(row.label,'open',row.record,row.label === 'Dossier öffnen' ? 'folder' : 'calendar') : '') + '</div>').join('') :
       '<div class="assistant-bubble assistant"><p>' + (aiAvailable ?
-      'Wobei kann ich dir helfen? Ich kann etwas in einem Dossier festhalten, Termine und Aufgaben erfassen oder deine Planung nachschauen.' :
+      'Was möchtest du erledigen? Du kannst mir zum Beispiel deine Einkaufsliste diktieren, nach einer E-Mail fragen oder einen Termin verschieben.' :
       'Erfasse einen Termin oder eine Aufgabe oder suche eine Mittagspause.') + '</p></div>';
     const controls = !proposal ? '' :
       '<div class="assistant-tools">' +
@@ -387,7 +390,7 @@ export function makeAssistant(ctx, currentAccounts) {
       '<div class="assistant-tools"><div class="actions">' +
       button('Termin prüfen', 'care-review', '', 'calendar', 'primary') + button('Entwurf verwerfen', 'care-discard') +
       '</div></div>' : '';
-    return '<p class="hint assistant-running">' + status + '</p>' + (history.length || !sleep ? messages : '') + caseControls + appointmentControls +
+    return '<p class="hint assistant-running">' + status + '</p>' + (history.length || !sleep ? messages : '') + caseControls + appointmentControls + (!busy ? workspace.buttons() : '') +
       (!busy ? controls + sleepBubble(sleep) : '<p class="hint assistant-running" role="status">Einen Moment …</p>');
   }
   function open(autoLunch = false, sleepDay = '') {
@@ -395,7 +398,7 @@ export function makeAssistant(ctx, currentAccounts) {
     let shownSleep = openSleepQuestion();
     const dialog = openDialog('LifeCase-Assistent', '<div class="assistant-thread" aria-live="polite">' + content(shownSleep) + '</div>' +
       '<form class="assistant-form"><button type="button" class="icon-btn" data-assistant-lunch-tool aria-label="Mittagspause finden">' + icon('sun', 20) + '</button>' +
-      '<textarea name="request" aria-label="Deine Nachricht" maxlength="500" rows="2" placeholder="Was soll ich festhalten oder planen?" ' +
+      '<textarea name="request" aria-label="Deine Nachricht" maxlength="1800" rows="2" placeholder="Was möchtest du erledigen?" ' +
       'enterkeyhint="send" autocomplete="off" required>' + esc(pendingMessage) + '</textarea>' +
       '<button type="submit" class="button primary" aria-label="Nachricht senden">' +
       icon('arrow', 21) + '</button></form>');
@@ -457,6 +460,7 @@ export function makeAssistant(ctx, currentAccounts) {
     });
     thread.addEventListener('click', event => {
       const control = event.target.closest('button');
+      if (control?.hasAttribute('data-workspace-choice')) { run(() => workspace.choose(Number(control.dataset.workspaceChoice))); return; }
       if (control?.hasAttribute('data-sleep-reply') && shownSleep) {
         const wake = control.dataset.sleepReply;
         const question = shownSleep;
@@ -489,6 +493,7 @@ export function makeAssistant(ctx, currentAccounts) {
       const question = shownSleep;
       const answer = readSleepReply(text, question?.plan.morning);
       if (!answer && aiAvailable === null) return;
+      workspace.clear();
       field.value = '';
       pendingMessage = '';
       add('user', text);

@@ -1,7 +1,7 @@
 import { deliverReminders, managePush } from './push-reminders.js';
 import { pollRules } from './mail-poll.js';
 import { createClient } from 'npm:@supabase/supabase-js@2.119.2';
-import { authorizationUrl, createLunchBlock, driveOriginal, exchange, Failure, listDriveFiles, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
+import { authorizationUrl, createMailDraft, createLunchBlock, driveOriginal, exchange, Failure, listDriveFiles, listCalendar, listMail, messageDetail, messageFile, profile, providers, revokeGoogle, swissDay } from './providers.js';
 
 const project = Deno.env.get('SUPABASE_URL');
 const secret = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ||
@@ -53,20 +53,23 @@ async function status(user) {
   const entries = await Promise.all(Object.keys(providers).map(async provider => {
     const [config, link] = await Promise.all([vault('config', user, provider), vault('status', user, provider)]);
     const stored = provider !== 'drive' && link?.connected ? await vault('read', user, provider) : null;
-    return [provider, { available: isConfigured(config), ...link, calendarWrite: stored?.tokens?.calendarWrite === true }];
+    return [provider, { available: isConfigured(config), ...link, accountRef: stored?.account || '', calendarWrite: stored?.tokens?.calendarWrite === true, mailDrafts: stored?.tokens?.mailDrafts === true }];
   }));
   return { accounts: Object.fromEntries(entries), callback };
 }
-async function begin(user, provider, origin, write = false) {
+async function begin(user, provider, origin, grant = '') {
   const cfg = await vault('config', user, provider);
   if (!isConfigured(cfg)) throw new Failure(409, 'Die Anbieterregistrierung für LifeCase fehlt.');
-  const state = (write ? 'w2_' : 'r2_') + nonce().slice(3);
+  const existing = grant ? await vault('read', user, provider) : null;
+  const write = grant === 'calendar' || Boolean(existing?.tokens.calendarWrite);
+  const drafts = grant === 'drafts' || Boolean(existing?.tokens.mailDrafts);
+  const state = (drafts ? (write ? 'b3_' : 'm3_') : write ? 'w2_' : 'r2_') + nonce().slice(3);
   const verifier = nonce();
   unwrap(await service.from('lifecase_oauth_pending').upsert({
     user_id: user, provider, state_hash: hex(await hash(state)), verifier, app_url: apps.get(origin),
     expires_at: new Date(Date.now() + 10 * 60000).toISOString(),
   }, { onConflict: 'user_id,provider' }));
-  return { url: authorizationUrl(provider, cfg, callback, state, base64(await hash(verifier)), write) };
+  return { url: authorizationUrl(provider, cfg, callback, state, base64(await hash(verifier)), write, drafts) };
 }
 async function callbackRequest(url) {
   const state = url.searchParams.get('state') ?? '';
@@ -80,9 +83,10 @@ async function callbackRequest(url) {
   try {
     const cfg = await vault('config', user, provider);
     if (!isConfigured(cfg)) return toApp(app_url, 'failed');
-    const write = state.startsWith('w2_') && provider !== 'drive';
-    const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier }, '', write);
-    if (write && !tokens.calendarWrite) return toApp(app_url, 'failed');
+    const write = /^(w2|b3)_/.test(state) && provider !== 'drive';
+    const drafts = /^(m3|b3)_/.test(state) && provider !== 'drive';
+    const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier }, '', write, drafts);
+    if ((write && !tokens.calendarWrite) || (drafts && !tokens.mailDrafts)) return toApp(app_url, 'failed');
     const account = await profile(provider, tokens.access);
     await vault('write', user, provider, { ...account, tokens });
     return toApp(app_url, provider === 'drive' ? 'drive-connected' : 'connected');
@@ -98,7 +102,7 @@ async function activeLink(user, provider) {
   if (!isConfigured(cfg)) throw new Failure(409, 'Die Anbieterregistrierung für LifeCase fehlt.');
   let tokens;
   try {
-    tokens = await exchange(provider, cfg, { grant_type: 'refresh_token', refresh_token: link.tokens.refresh }, link.tokens.refresh, link.tokens.calendarWrite === true);
+    tokens = await exchange(provider, cfg, { grant_type: 'refresh_token', refresh_token: link.tokens.refresh }, link.tokens.refresh, link.tokens.calendarWrite === true, link.tokens.mailDrafts === true);
   } catch (error) {
     const newer = await vault('read', user, provider);
     if (newer && newer.revision !== link.revision && newer.tokens.expires > Date.now()) return newer;
@@ -130,7 +134,7 @@ async function askStudio(req, config, values) {
         'OAI-Sites-Authorization': 'Bearer ' + config.service_token,
         'X-LifeCase-Session': req.headers.get('authorization').slice(7),
       },
-      body: JSON.stringify(values.action === 'assistant-briefing' ? { briefing: values.briefing } :
+      body: JSON.stringify(values.action === 'assistant-briefing' ? { briefing: values.briefing } : values.action === 'assistant-reading' ? { reading: values.reading } :
         { messages: values.messages, lastDate: values.lastDate, intentVersion: values.intentVersion, sleepDate: values.sleepDate }),
     });
   } catch {
@@ -185,12 +189,12 @@ Deno.serve(async req => {
   try {
     const user = await authenticate(req);
     const body = await req.text();
-    if (body.length > 8192) throw new Failure(413, 'Die LifeCase-Anfrage ist zu gross.');
+    if (body.length > 20000) throw new Failure(413, 'Die LifeCase-Anfrage ist zu gross.');
     let values;
     try { values = JSON.parse(body); } catch { throw new Failure(400, 'Ungültige LifeCase-Anfrage.'); }
     if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Failure(400, 'Ungültige LifeCase-Anfrage.');
     const { action, provider } = values;
-    if (['assistant-status', 'assistant', 'assistant-briefing'].includes(action)) {
+    if (['assistant-status', 'assistant', 'assistant-briefing', 'assistant-reading'].includes(action)) {
       const config = unwrap(await service.rpc('lifecase_assistant_access', { p_owner: user, p_charge: action !== 'assistant-status' }));
       if (action === 'assistant-status') return jsonify({ available: config?.available === true }, 200, headers);
       if (!config?.available) throw new Failure(409, 'OpenAI ist für dieses LifeCase-Konto noch nicht aktiviert.');
@@ -202,7 +206,8 @@ Deno.serve(async req => {
     if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
     if (typeof provider !== 'string' || !Object.hasOwn(providers, provider)) throw new Failure(400, 'Unbekannte Verbindung.');
     if (action === 'start') return jsonify(await begin(user, provider, origin), 200, headers);
-    if (action === 'start-calendar-write' && provider !== 'drive') return jsonify(await begin(user, provider, origin, true), 200, headers);
+    if (action === 'start-calendar-write' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'calendar'), 200, headers);
+    if (action === 'start-mail-drafts' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'drafts'), 200, headers);
     if (action === 'disconnect') return jsonify(await disconnect(user, provider), 200, headers);
     if (provider === 'drive') {
       if (!['drive-list', 'drive-file'].includes(action)) throw new Failure(400, 'Unbekannte Drive-Aktion.');
@@ -215,9 +220,15 @@ Deno.serve(async req => {
       const bytes = await driveOriginal(link.tokens.access, id);
       return new Response(bytes, { headers: { ...headers, 'Content-Type': 'application/octet-stream' } });
     }
-    if (!['calendar', 'mail', 'detail', 'file', 'block-lunch'].includes(action)) throw new Failure(400, 'Unbekannte LifeCase-Aktion.');
+    if (!['calendar', 'mail', 'detail', 'file', 'mail-draft', 'block-lunch'].includes(action)) throw new Failure(400, 'Unbekannte LifeCase-Aktion.');
     const link = await activeLink(user, provider);
+    if (values.account && values.account !== link.account) throw new Failure(409, 'Das Postfach wurde gewechselt. Suche die Nachricht erneut.');
     const access = link.tokens.access;
+    if (action === 'mail-draft') {
+      if (!link.tokens.mailDrafts) throw new Failure(403, 'Erlaube unter Verbindungen zuerst E-Mail-Entwürfe für dieses Konto.');
+      if (values.account !== link.account) throw new Failure(409, 'Das Konto wurde gewechselt. Prüfe den Absender erneut.');
+      return jsonify(await createMailDraft(provider, access, values), 200, headers);
+    }
     if (action === 'block-lunch') {
       if (!link.tokens.calendarWrite) throw new Failure(403, 'Erlaube LifeCase zuerst das Blockieren im gewählten Kalender.');
       const day = calendarDay(values, 'date');
@@ -240,7 +251,12 @@ Deno.serve(async req => {
       if (through < from || Date.parse(through) - Date.parse(from) > 60 * 86400000) throw new Failure(400, 'Wähle einen Zeitraum bis zu 61 Tagen.');
       return jsonify({ events: await listCalendar(provider, access, from, through) }, 200, headers);
     }
-    if (action === 'mail') return jsonify(await listMail(provider, access, arg(values, 'query', 160), arg(values, 'cursor', 2048)), 200, headers);
+    if (action === 'mail') {
+      const from=values.from ? calendarDay(values,'from') : '';
+      const through=values.through ? calendarDay(values,'through') : '';
+      if (from && through && from>through) throw new Failure(400,'Prüfe den Zeitraum.');
+      return jsonify(await listMail(provider,access,arg(values,'query',160),arg(values,'cursor',2048),from,through),200,headers);
+    }
     const id = arg(values, 'id', 1024, true);
     if (action === 'detail') {
       const row = await messageDetail(provider, access, id);

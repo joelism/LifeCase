@@ -127,3 +127,10 @@ export async function saveIntakeRecord(fields, section = 'Kalender') {
   return get(await db.from('lifecase_records').select('*').eq('section', section)
     .eq('fields->>intakeKey', fields.intakeKey).single());
 }
+
+// Concurrent first additions to the same named list must converge before changing its items.
+export async function ensureShoppingList(id, title) {
+  const saved = get(await db.from('lifecase_records').upsert({ id, section:'Einkaufen', fields:{title,items:[]} },
+    { onConflict:'id', ignoreDuplicates:true }).select().maybeSingle());
+  return saved || findRecord(id);
+}

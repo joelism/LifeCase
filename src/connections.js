@@ -287,7 +287,7 @@ export function makeConnections(ctx) {
   }
   async function connect(provider, write = false) {
     try {
-      const data = await connection(write ? 'start-calendar-write' : 'start', { provider });
+      const data = await connection(write === 'drafts' ? 'start-mail-drafts' : write ? 'start-calendar-write' : 'start', { provider });
       const url = new URL(data.url);
       if (!['login.microsoftonline.com', 'accounts.google.com'].includes(url.hostname) || url.protocol !== 'https:') throw userError('Ungültige Anbieteradresse.');
       location.assign(url);
@@ -413,6 +413,7 @@ export function makeConnections(ctx) {
     if ('integrationRefresh' in data) status(true);
     else if ('copyOutlookCallback' in data) copyOutlookCallback();
     else if ('connect' in data) connect(data.connect);
+    else if ('connectMailDrafts' in data) connect(data.connectMailDrafts, 'drafts');
     else if ('connectCalendarWrite' in data) connect(data.connectCalendarWrite, true);
     else if ('disconnect' in data) disconnect(data.disconnect);
     else if ('mailProvider' in data) {
@@ -436,5 +437,5 @@ export function makeConnections(ctx) {
   }
   function search(form) { loadMail(String(new FormData(form).get('query') || '').trim()); }
   function range(element) { state.healthRange = element.value; update(); }
-  return { state, reset, status, agenda, loadRecentSleep, activate, consumeReturn, click: handleClick, search, range };
+  return { state, reset, status, agenda, showMailImport, loadRecentSleep, activate, consumeReturn, click: handleClick, search, range };
 }

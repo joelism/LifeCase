@@ -371,5 +371,5 @@ export function makeDaily(ctx, getAccounts) {
       ctx.notify(enabled ? 'Mailprüfung aktiviert.' : 'Mailprüfung pausiert.');
     });
   }
-  return { state, reset, load, click, submitPage };
+  return { state, reset, load, click, submitPage, changeList };
 }

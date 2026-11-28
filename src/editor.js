@@ -98,7 +98,7 @@ export function editRecord(section, row, ctx, initial = {}) {
     notes: [value(row, 'notes'), 'Ursprünglicher Chat-Titel: ' + legacy.original].filter(Boolean).join('\n\n') } : {};
   const seeds = { date: ['Chronik','Kalender','Gespräche'].includes(section) ? todayDefault : '', validFrom: todayDefault, ...initial };
   const form = openDialog(row ? info.noun + ' bearbeiten' : info.create, '<div class="form-grid">' + info.fields.map(field => input(field,
-    row ? proposed[field.key] ?? (value(row, field.key) || field.initial || '') : seeds[field.key] ?? field.initial ?? '', ctx.rows(), row)).join('') +
+    row ? initial[field.key] ?? proposed[field.key] ?? (value(row, field.key) || field.initial || '') : seeds[field.key] ?? field.initial ?? '', ctx.rows(), row)).join('') +
     '<label class="input-wrap wide">Originaldateien<input type="file" name="originals" multiple><span class="hint">Bis zu 25 MB pro Datei.</span></label>' +
     errorBox + '</div>', button('Abbrechen', 'close') + '<button type="submit" class="button primary">' + icon('check', 18) + 'Speichern</button>', true).querySelector('form');
   if (section === 'Kalender') {
