@@ -58,7 +58,7 @@ GitHub Pages bedient `index.html`, `app.js`, `styles.css` und die PWA-Dateien au
 - **Einkaufen** speichert mehrere Einkaufslisten mit Mengen und abhaktbarem Zustand im LifeCase-Konto.
 - **Scannen** liest Fotos im Browser. Die Texterkennung lädt ihre OCR-Komponenten bei Bedarf. Originalbilder werden beim Speichern optional in den privaten Dokumentenspeicher übertragen. Bei Teamplänen wird die angegebene Namenszeile mit den Datumsüberschriften abgeglichen. Prüfe die Vorschau, bevor du Schichten übernimmst.
 - **Terminprüfung** verwendet einen integrierten Textklassifikator und prüft Datumsangaben im Originaltext. Sie verarbeitet seit der Aktivierung eingegangene Nachrichten in verbundenen Konten. Eindeutige Termine können direkt übernommen werden. Unverbindliche Angaben, Terminänderungen und Fälle mit mehreren Möglichkeiten erscheinen als Vorschläge. Diese Einstellung wird nach der Kontoverbindung in LifeCase aktiviert.
-- Die Mailprüfung läuft um 08:00, 14:00 und 20:00 Uhr in der Zeitzone Europe/Zurich. Die Edge Function empfängt geplante Aufrufe über einen gesonderten, in Vault verwalteten Schlüssel. Für die Auswertung der Nachrichten ist kein externer KI-Dienst erforderlich.
+- Die aktivierte Mailprüfung läuft um 08:00, 12:00, 16:00 und 20:00 Uhr in der Zeitzone Europe/Zurich. Die Edge Function empfängt geplante Aufrufe über einen gesonderten, in Vault verwalteten Schlüssel. Für die Auswertung der Nachrichten ist kein externer KI-Dienst erforderlich.
 
 ## LifeCase 2.2
 
@@ -79,3 +79,7 @@ Die Pause kann im LifeCase-Kalender gespeichert werden. Für einen verbundenen O
 - **Meine Woche** zeigt die nächsten sieben Tage mit Terminen, Schichten, Aufgaben und Fristen. Überfällige und undatierte Aufgaben bleiben griffbereit und lassen sich direkt erledigen.
 - **Vorbereitung** speichert Fragen, Stichpunkte und eine abhakbare Liste zu einem Termin. Verknüpfte Dossiers bringen passende Unterlagen in die Ansicht.
 - **Wiedervorlage** legt aus einem Dossier oder Eintrag eine verknüpfte Aufgabe an. Im Chat funktionieren auch Eingaben wie «Bis Freitag IV anrufen» und «Aufgabe: Milch kaufen».
+
+## Prüfung von Änderungen
+
+Vor einer Veröffentlichung laufen die Fachtests mit `npm test`. Die mobilen Browsertests mit Chromium und WebKit verwenden synthetische Konten und vollständig simulierte Netzwerkantworten. Lokal laufen sie mit `npm run build:pages`, `npx playwright install chromium` und `npm run test:browser`. Der GitHub-Workflow führt diese Prüfungen bei Pushes und Pull Requests aus und vergleicht den Build mit den veröffentlichten Dateien.

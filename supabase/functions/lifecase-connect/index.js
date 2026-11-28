@@ -30,10 +30,11 @@ const isConfigured = config => Boolean(config?.client_id?.trim() && config?.clie
 const jsonify = (value, status, headers) => new Response(JSON.stringify(value), {
   status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' },
 });
-function toApp(url, status) {
+function toApp(url, status, separate = false) {
   if (![...apps.values()].includes(url)) return new Response('Ungültige Rücksprungadresse.', { status: 400, headers: baseHeaders });
   const target = new URL(url);
   target.searchParams.set('lcConnection', status);
+  if (separate) target.searchParams.set('lcWindow','1');
   return new Response(null, { status: 303, headers: { ...baseHeaders, Location: target.href } });
 }
 
@@ -57,13 +58,14 @@ async function status(user) {
   }));
   return { accounts: Object.fromEntries(entries), callback };
 }
-async function begin(user, provider, origin, grant = '') {
+async function begin(user, provider, origin, grant = '', separate = false) {
   const cfg = await vault('config', user, provider);
   if (!isConfigured(cfg)) throw new Failure(409, 'Die Anbieterregistrierung für LifeCase fehlt.');
   const existing = grant ? await vault('read', user, provider) : null;
   const write = grant === 'calendar' || Boolean(existing?.tokens.calendarWrite);
   const drafts = grant === 'drafts' || Boolean(existing?.tokens.mailDrafts);
-  const state = (drafts ? (write ? 'b3_' : 'm3_') : write ? 'w2_' : 'r2_') + nonce().slice(3);
+  const mode = drafts ? (write ? 'b' : 'm') : write ? 'w' : 'r';
+  const state = mode + (separate ? '4_' : drafts ? '3_' : '2_') + nonce().slice(3);
   const verifier = nonce();
   unwrap(await service.from('lifecase_oauth_pending').upsert({
     user_id: user, provider, state_hash: hex(await hash(state)), verifier, app_url: apps.get(origin),
@@ -77,21 +79,27 @@ async function callbackRequest(url) {
   const pending = unwrap(await service.from('lifecase_oauth_pending').delete().eq('state_hash', hex(await hash(state)))
     .gt('expires_at', new Date().toISOString()).select('user_id,provider,verifier,app_url').maybeSingle());
   if (!pending) return new Response('Die LifeCase-Freigabe ist abgelaufen oder wurde bereits verwendet.', { status: 400, headers: baseHeaders });
+  const separate=/^[bmwr]4_/.test(state);
+  const back=result=>toApp(pending.app_url,result,separate);
   const code = url.searchParams.get('code');
-  if (!code || code.length > 4096 || url.searchParams.has('error')) return toApp(pending.app_url, 'failed');
+  if (!code || code.length > 4096 || url.searchParams.has('error')) return back('failed');
   const { user_id: user, provider, verifier, app_url } = pending;
   try {
     const cfg = await vault('config', user, provider);
-    if (!isConfigured(cfg)) return toApp(app_url, 'failed');
-    const write = /^(w2|b3)_/.test(state) && provider !== 'drive';
-    const drafts = /^(m3|b3)_/.test(state) && provider !== 'drive';
+    if (!isConfigured(cfg)) return back('failed');
+    const write = /^(w[24]|b[34])_/.test(state) && provider !== 'drive';
+    const drafts = /^[mb][34]_/.test(state) && provider !== 'drive';
     const tokens = await exchange(provider, cfg, { grant_type: 'authorization_code', redirect_uri: callback, code, code_verifier: verifier }, '', write, drafts);
-    if ((write && !tokens.calendarWrite) || (drafts && !tokens.mailDrafts)) return toApp(app_url, 'failed');
+    if ((write && !tokens.calendarWrite) || (drafts && !tokens.mailDrafts)) return back('failed');
     const account = await profile(provider, tokens.access);
+    if (write || drafts) {
+      const existing=await vault('read',user,provider);
+      if (existing && existing.account!==account.account) return back('wrong-account');
+    }
     await vault('write', user, provider, { ...account, tokens });
-    return toApp(app_url, provider === 'drive' ? 'drive-connected' : 'connected');
+    return back(provider === 'drive' ? 'drive-connected' : 'connected');
   } catch {
-    return toApp(app_url, 'failed');
+    return back('failed');
   }
 }
 async function activeLink(user, provider) {
@@ -205,9 +213,9 @@ Deno.serve(async req => {
     if (['push-public-key','push-subscribe','push-unsubscribe'].includes(action)) return jsonify(await managePush(service, user, action, values), 200, headers);
     if (action === 'check-mail') return jsonify(await pollRules(service, activeLink, user), 200, headers);
     if (typeof provider !== 'string' || !Object.hasOwn(providers, provider)) throw new Failure(400, 'Unbekannte Verbindung.');
-    if (action === 'start') return jsonify(await begin(user, provider, origin), 200, headers);
-    if (action === 'start-calendar-write' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'calendar'), 200, headers);
-    if (action === 'start-mail-drafts' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'drafts'), 200, headers);
+    if (action === 'start') return jsonify(await begin(user, provider, origin, '', values.separateWindow===true), 200, headers);
+    if (action === 'start-calendar-write' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'calendar', values.separateWindow===true), 200, headers);
+    if (action === 'start-mail-drafts' && provider !== 'drive') return jsonify(await begin(user, provider, origin, 'drafts', values.separateWindow===true), 200, headers);
     if (action === 'disconnect') return jsonify(await disconnect(user, provider), 200, headers);
     if (provider === 'drive') {
       if (!['drive-list', 'drive-file'].includes(action)) throw new Failure(400, 'Unbekannte Drive-Aktion.');

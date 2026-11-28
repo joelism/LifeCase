@@ -1,3 +1,4 @@
+import { providerReturnPage } from './provider-grant.js';
 import { isSleepPlanningTime, planSleep, sleepMorning, sleepMorningCanBeSaved, sleepMorningDate, sleepMorningUpdate, sleepPreferences, sleepProfileUpdate, validSleepPlan } from './sleep-plan.js';
 import { renderSleepPlan, sleepSettingsFields } from './sleep-views.js';
 import { appointmentCheckIns } from './appointment-care.js';
@@ -44,6 +45,7 @@ const ctx = {
   sleepCheckIn, saveSleepMorning, owner: () => state.session?.user?.id,
   scan: mode => daily.click({scanStart:mode}), sleepSettings: () => openSleepSettings(),
   prepareAssistantRecord: row => planner.click({plannerPrepare: row.id}),
+  authorizeMailDrafts: (provider,fallback,ready) => connected.authorize(provider,'drafts',fallback,ready),
   changeShopping: (id,change) => daily.changeList(id,change),
   importDriveFile: file => drive.importFile(file),
   importAssistantMail: (mail,getFile) => connected.showMailImport(mail,getFile),
@@ -693,7 +695,7 @@ db.auth.onAuthStateChange((event, session) => {
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   navigator.serviceWorker.register(new URL('./sw.js', document.baseURI)).catch(() => {});
 }
-try {
+if (!providerReturnPage(new URL(location.href), app)) try {
   const current = get(await db.auth.getSession());
   await acceptSession(current.session);
 } catch (error) {

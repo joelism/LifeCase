@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { detectAppointments, detectShifts, readDates } from '../supabase/functions/lifecase-connect/appointment-intake.js';
-import { listIncomingMail } from '../supabase/functions/lifecase-connect/providers.js';
+import { incomingMailPage } from '../supabase/functions/lifecase-connect/providers.js';
 import { planCandidates } from '../src/scan-layout.js';
 import { calendarFile } from '../src/calendar-file.js';
 import { shoppingPage } from '../src/daily-views.js';
@@ -62,8 +62,8 @@ test('mail polling restricts both providers to inbox and a received time', async
     if (url.hostname.includes('googleapis')) return Response.json({ messages: [{ id: 'mail1' }] });
     return Response.json({ value: [{ id: 'mail2', receivedDateTime: '2026-11-27T10:15:00Z' }] });
   });
-  assert.deepEqual(await listIncomingMail('google', 'qa', reference, 60), [{ id: 'mail1' }]);
-  assert.equal((await listIncomingMail('microsoft', 'qa', reference, 60))[0].id, 'mail2');
+  assert.deepEqual((await incomingMailPage('google', 'qa', reference, null, 60)).rows, [{ id: 'mail1' }]);
+  assert.equal((await incomingMailPage('microsoft', 'qa', reference, null, 60)).rows[0].id, 'mail2');
   const urls = fake.mock.calls.map(call => new URL(call.arguments[0]));
   assert.equal(urls[0].searchParams.get('labelIds'), 'INBOX');
   assert.match(urls[0].searchParams.get('q'), /^after:\d{10}$/);

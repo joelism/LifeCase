@@ -112,9 +112,13 @@ export function makeWorkspace(ctx, add) {
       };
       if (cmd.operation === 'record_create') return openEditor(cmd.section);
       const lookup = !cmd.query && cmd.position && results.record && !cmd.from && !cmd.through;
-      const hits = lookup ? results.record.map(r=>rows.find(i=>i.id===r.id)).filter(r=>r && isActive(r) && (!cmd.section || sectionOf(r)===cmd.section)) :
+      const previous = lookup && results.record[cmd.position-1];
+      const selectedRow = previous && rows.find(row=>row.id===previous.id && isActive(row) && (!cmd.section || sectionOf(row)===cmd.section));
+      if (lookup && !selectedRow) return show('Dieser Treffer ist nicht mehr verfügbar. Suche den Eintrag erneut.');
+      const hits = lookup ? [selectedRow] :
         searchRecords(rows,ctx.files(),cmd.query,{section:cmd.section,from:cmd.from,to:cmd.through});
       if (cmd.operation === 'prepare') {
+        if (lookup) return ctx.canPrepare(selectedRow) ? ctx.prepareAssistantRecord(selectedRow) : show('Dieser Eintrag hat keine Terminvorbereitung.');
         return chooseRow('record',hits.filter(ctx.canPrepare),summary,row=>ctx.prepareAssistantRecord(row));
       }
       if (cmd.operation === 'record_answer') {
@@ -144,6 +148,7 @@ export function makeWorkspace(ctx, add) {
         return show(hits.length ? hits.length+' Treffer\n'+hits.slice(0,10).map((r,i)=>(i+1)+'. '+summary(r)).join('\n') : 'Keine passenden Einträge gefunden.',
           hits.slice(0,10).map((r,i)=>link('Nr. '+(i+1),()=>display(r))), 'Eintragssuche mit '+Math.min(hits.length,10)+' nummerierten Treffern.');
       }
+      if (lookup) return display(selectedRow);
       return chooseRow('record',exact?.length ? exact : hits,summary,display);
     }
 
@@ -185,6 +190,9 @@ export function makeWorkspace(ctx, add) {
     if (cmd.operation==='mail_draft') return mailEditor(keys,accounts,Object.fromEntries(cmd.pairs.map(p=>[p.key,p.value])));
     if (!keys.length) return show('Verbinde für diesen Auftrag zuerst dein '+(providerName[cmd.provider] || 'Gmail- oder Outlook')+'-Konto.',[navigate('Verbindungen')]);
     const cached=!['mail_search','mail_digest'].includes(cmd.operation) && !cmd.query && !cmd.from && !cmd.through && results.mail?.length;
+    const referenced = cached && cmd.position ? results.mail[cmd.position-1] : null;
+    if (cached && cmd.position && (!referenced || !keys.includes(referenced.provider) || referenced.account!==accounts[referenced.provider]?.accountRef))
+      return show('Dieser nummerierte Treffer gehört nicht zum gewählten Postfach oder ist nicht mehr verfügbar. Suche die Mail erneut.');
     let hits = cached ? results.mail.filter(r=>keys.includes(r.provider) && r.account===accounts[r.provider].accountRef) : [];
     let errors=[];
     if (cached && !hits.length) return show('Die vorherigen Treffer gehören zu einem anderen Postfach. Starte eine neue Suche.');
@@ -197,7 +205,7 @@ export function makeWorkspace(ctx, add) {
       if (responses.some(r=>r.status==='fulfilled' && r.value.partial)) errors.push('Weitere Nachrichten im Zeitraum wurden nicht durchsucht. Grenze die Suche bei Bedarf ein.');
       hits.sort((a,b)=>b.date.localeCompare(a.date));
     }
-    results.mail=hits.slice(0,25);
+    if (!cached) results.mail=hits.slice(0,25);
     const label=r=>providerName[r.provider]+' · '+showDate(r.date)+' · '+r.sender+' · '+r.subject;
     if (cmd.operation==='mail_digest') {
       if (!hits.length) return show(['Keine passenden Nachrichten gefunden.',...errors].join('\n'));
@@ -232,6 +240,7 @@ export function makeWorkspace(ctx, add) {
     if (cmd.operation==='mail_search') return show((hits.length ? hits.slice(0,10).map((r,i)=>(i+1)+'. '+label(r)).join('\n') : 'Keine passenden Nachrichten gefunden.')+(errors.length?'\n'+errors.join('\n'):''),
       hits.slice(0,10).map((r,i)=>link('Nr. '+(i+1)+' lesen',()=>select(r))), 'E-Mail-Suche mit '+Math.min(10,hits.length)+' nummerierten Treffern.');
     if (errors.length && !hits.length) return show('Keine Treffer in den erreichbaren Postfächern.\n'+errors.join('\n'));
+    if (referenced) return select(referenced);
     const selected=results.selectedMail;
     if (cached && !cmd.position && selected && hits.some(r=>r.id===selected.id && r.provider===selected.provider && r.account===selected.account)) return select(selected);
     return chooseRow('mail',hits,label,select);
@@ -247,15 +256,30 @@ export function makeWorkspace(ctx, add) {
       '<p class="hint" data-grant></p><p class="form-error" hidden role="alert"></p>',
       button('Schliessen','close')+button('Im Mailprogramm öffnen','compose-external')+'<button class="button primary" type="submit">Im Postfach speichern</button>',true).querySelector('form');
     const save=form.querySelector('[type=submit]');
+    let saving=false;
     const refresh=()=>{
       const allowed=accounts[form.elements.provider.value]?.mailDrafts;
-      save.disabled=!allowed; save.hidden=!allowed;
+      save.disabled=saving || !allowed; save.hidden=!allowed;
       const hint=form.querySelector('[data-grant]');
       hint.textContent=allowed ? 'Du findest den Entwurf anschliessend im gewählten Postfach und kannst ihn dort versenden.' :
         'Für dieses Konto fehlt die Freigabe «E-Mail-Entwürfe erlauben» unter Verbindungen.';
       if (!allowed) {
-        const control=document.createElement('button'); control.type='button'; control.className='button'; control.textContent='Verbindungen öffnen';
-        control.onclick=()=>{ ctx.go('Verbindungen'); };
+        const control=document.createElement('button'); control.type='button'; control.className='button'; control.textContent=keys.length ? 'Entwürfe erlauben' : 'Verbindungen öffnen';
+        control.onclick=()=>{
+          const provider=form.elements.provider.value;
+          if (!provider) { ctx.go('Verbindungen'); return; }
+          ctx.authorizeMailDrafts(provider,(href,check)=>{
+            if (!form.isConnected || ctx.epoch()!==epoch) return;
+            const a=document.createElement('a'); a.href=href; a.target='_blank'; a.rel='noopener noreferrer'; a.textContent='Freigabe beim Anbieter öffnen';
+            hint.replaceChildren(a, ' '); const verify=document.createElement('button'); verify.type='button'; verify.textContent='Freigabe prüfen'; verify.onclick=check; hint.append(verify);
+          },updated=>{
+            if (!form.isConnected || ctx.epoch()!==epoch) return;
+            if (accounts[provider].accountRef!==updated[provider]?.accountRef) {
+              errorAt(form,userError('Das verbundene Postfach hat gewechselt. Öffne einen neuen Entwurf.')); return;
+            }
+            accounts=updated; refresh();
+          });
+        };
         hint.append(' ',control);
       }
     };
@@ -266,8 +290,8 @@ export function makeWorkspace(ctx, add) {
     };
     form.elements.provider.onchange=refresh; refresh();
     form.onsubmit=async event=>{
-      event.preventDefault(); if (save.disabled || epoch!==ctx.epoch()) return;
-      const f=new FormData(form), provider=f.get('provider'); save.disabled=true;
+      event.preventDefault(); if (saving || save.disabled || epoch!==ctx.epoch()) return;
+      const f=new FormData(form), provider=f.get('provider'); saving=true; save.disabled=true; form.elements.provider.disabled=true;
       try {
         const result=await connection('mail-draft',{provider,account:accounts[provider].accountRef,replyId,to:f.get('to').trim(),subject:f.get('subject').trim(),body:f.get('body').trim()});
         if (!result.saved) throw userError('Der Anbieter hat den Entwurf nicht bestätigt.');
@@ -275,7 +299,7 @@ export function makeWorkspace(ctx, add) {
           add('assistant','Der Entwurf ist in '+providerName[provider]+' unter «Entwürfe» gespeichert.');
           if (form.isConnected) ctx.returnToAssistant();
         }
-      } catch(error) { if (form.isConnected && epoch===ctx.epoch()) { errorAt(form,error); refresh(); } }
+      } catch(error) { if (form.isConnected && epoch===ctx.epoch()) { saving=false; form.elements.provider.disabled=false; errorAt(form,error); refresh(); } }
     };
   }
   return { execute, reset, clear, buttons, choose };

@@ -140,3 +140,16 @@ test('reply drafts are attached to the selected original thread and never invoke
   assert.equal(google.threadId,'thread1');assert.match(Buffer.from(google.raw,'base64url').toString(),/In-Reply-To: <original@example.org>/);
   assert.match(calls[2].url,/source\/createReply$/);assert.equal(JSON.parse(calls[2].init.body).message.body.content,'Danke');
 });
+
+test('numbered record edits keep the original identity when a prior result is archived on another device',async()=>{
+  const a={id:'first',section:'Personen',fields:{title:'Prüfkontakt A'}};
+  const b={id:'second',section:'Personen',fields:{title:'Prüfkontakt B'}};
+  rows.push(a,b);
+  await app.execute(command('record_search',{query:'Prüfkontakt'}),'',1);
+  a.archived_at='today';
+  const count=notices.length;
+  await app.execute(command('record_edit',{section:'Personen',position:1,pairs:[item('phone','000')]}),'',1);
+  assert.equal(notices.length,count);assert.match(messages.at(-1).text,/nicht mehr verfügbar/);
+  await app.execute(command('record_edit',{section:'Personen',position:2,pairs:[item('phone','123')]}),'',1);
+  assert.equal(notices.at(-1).row.id,b.id);
+});

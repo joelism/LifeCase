@@ -1,3 +1,4 @@
+import { makeProviderGrant } from './provider-grant.js';
 import { message, saveImportedMail, storeImportedOriginal, userError } from './backend.js';
 import { clearHealthRows, connection, healthRows, writeHealthRows } from './connections-api.js';
 import { expandEvents, providers } from './connected-model.js';
@@ -16,6 +17,7 @@ const initial = () => ({
 });
 
 export function makeConnections(ctx) {
+  const grants = makeProviderGrant(connection,ctx.epoch,ctx.notify);
   const state = initial();
   let lastStatus = 0;
   let mailSerial = 0;
@@ -34,6 +36,7 @@ export function makeConnections(ctx) {
     try { await callback(); } catch (error) { errorAt(form, error); } finally { control.disabled = false; }
   };
   function reset() {
+    grants.reset();
     ++mailSerial;
     ++calendarSerial;
     stopHealthRead?.();
@@ -285,13 +288,22 @@ export function makeConnections(ctx) {
       });
     });
   }
-  async function connect(provider, write = false) {
-    try {
-      const data = await connection(write === 'drafts' ? 'start-mail-drafts' : write ? 'start-calendar-write' : 'start', { provider });
-      const url = new URL(data.url);
-      if (!['login.microsoftonline.com', 'accounts.google.com'].includes(url.hostname) || url.protocol !== 'https:') throw userError('Ungültige Anbieteradresse.');
-      location.assign(url);
-    } catch (error) { ctx.notify(message(error)); }
+  function authorize(provider, grant, fallback, ready) {
+    return grants.begin(provider,grant,fallback,async accounts=>{
+      state.accounts=accounts;
+      lastStatus=Date.now();
+      update(['Verbindungen','Posteingang','Terminprüfung','Google Drive']);
+      ctx.accountsLoaded();
+      if (ready) ready(accounts);
+      else ctx.notify('Kontofreigabe bestätigt.');
+    });
+  }
+  function connect(provider, write = false) {
+    return authorize(provider,write==='drafts'?'drafts':write?'calendar':'',(href,check)=>{
+      const modal=openDialog('Konto verbinden','<a class="button primary" href="'+esc(href)+'" target="_blank" rel="noopener noreferrer">Freigabe beim Anbieter öffnen</a>'+
+        '<p>Kehre danach zu LifeCase zurück.</p>',button('Freigabe prüfen','verify-grant'));
+      modal.querySelector('[data-verify-grant]').onclick=check;
+    });
   }
   async function copyOutlookCallback() {
     const callback = state.callback;
@@ -437,5 +449,5 @@ export function makeConnections(ctx) {
   }
   function search(form) { loadMail(String(new FormData(form).get('query') || '').trim()); }
   function range(element) { state.healthRange = element.value; update(); }
-  return { state, reset, status, agenda, showMailImport, loadRecentSleep, activate, consumeReturn, click: handleClick, search, range };
+  return { state, reset, status, agenda, authorize, showMailImport, loadRecentSleep, activate, consumeReturn, click: handleClick, search, range };
 }

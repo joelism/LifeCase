@@ -1,6 +1,6 @@
 const PREFIX = 'lifecase-shell-';
-const CACHE = 'lifecase-shell-e88c9e4e7a017ad0';
-const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./app.js?v=e88c9e4e7a017ad0","./styles.css?v=e88c9e4e7a017ad0","./site-assets/health-worker-BG6KKC8a.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-DN5sBaSs.js","./site-assets/model-DpnCGh3K.js","./site-assets/ocr-o4e5i9lt.js","./site-assets/pdf-DW2Cm6KI.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-WT8pvM8y.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
+const CACHE = 'lifecase-shell-3645ea9f220ad793';
+const SHELL = ["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png","./app.js?v=3645ea9f220ad793","./styles.css?v=3645ea9f220ad793","./site-assets/health-worker-BG6KKC8a.js","./site-assets/html2canvas-saIJPa4Z.js","./site-assets/index.es-CUAmcuPQ.js","./site-assets/mail-file-DN5sBaSs.js","./site-assets/model-DpnCGh3K.js","./site-assets/ocr-o4e5i9lt.js","./site-assets/pdf-DW2Cm6KI.js","./site-assets/preload-helper-DUTjbZNf.js","./site-assets/purify.es-BQJV6A36.js","./site-assets/rolldown-runtime-DUjHZjTj.js","./site-assets/scan-layout-WT8pvM8y.js","./site-assets/typeof-B5XbjTb1.js","./site-assets/worker.min-B9Bty8gg.js"];
 const root = new URL('./', self.location.href);
 const urls = new Set(SHELL.map(path => new URL(path, root).href));
 
@@ -14,7 +14,15 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== root.origin) return;
   if (event.request.mode === 'navigate' && (url.pathname === root.pathname || url.pathname === root.pathname + 'index.html')) {
-    event.respondWith(fetch(event.request).catch(() => caches.open(CACHE).then(cache => cache.match(root.href))));
+    event.respondWith((async () => {
+      let response;
+      try {
+        response = await fetch(event.request);
+        if (response.ok || response.status < 500) return response;
+      } catch { /* Offline navigation uses the previously installed app shell. */ }
+      const cached = await (await caches.open(CACHE)).match(root.href);
+      return cached || response || Response.error();
+    })());
     return;
   }
   if (urls.has(url.href)) event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(response => response || fetch(event.request)));

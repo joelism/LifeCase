@@ -14,7 +14,15 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== root.origin) return;
   if (event.request.mode === 'navigate' && (url.pathname === root.pathname || url.pathname === root.pathname + 'index.html')) {
-    event.respondWith(fetch(event.request).catch(() => caches.open(CACHE).then(cache => cache.match(root.href))));
+    event.respondWith((async () => {
+      let response;
+      try {
+        response = await fetch(event.request);
+        if (response.ok || response.status < 500) return response;
+      } catch { /* Offline navigation uses the previously installed app shell. */ }
+      const cached = await (await caches.open(CACHE)).match(root.href);
+      return cached || response || Response.error();
+    })());
     return;
   }
   if (urls.has(url.href)) event.respondWith(caches.open(CACHE).then(cache => cache.match(event.request)).then(response => response || fetch(event.request)));

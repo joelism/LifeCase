@@ -73,6 +73,7 @@ export async function exchange(provider, cfg, params, oldRefresh = '', write = f
   });
   if (!response.ok) {
     await response.body?.cancel();
+    if (response.status === 429 || response.status >= 500) throw new Failure(503, 'Das Konto konnte gerade nicht aktualisiert werden. Versuche es später erneut.');
     throw new Failure(403, 'Die Freigabe ist abgelaufen oder ungültig. Verbinde das Konto erneut.');
   }
   const data = await response.json();
@@ -319,18 +320,31 @@ export async function listCalendar(provider, access, from, through) {
 }
 export const swissDay = timeZoneDay;
 
-export async function listIncomingMail(provider, access, since, limit) {
-  if (provider === 'google') {
-    const data = await getJson(withQuery(gmail + 'messages', {
-      labelIds: 'INBOX', q: 'after:' + Math.floor(since.getTime() / 1000), maxResults: limit,
-      fields: 'messages(id),nextPageToken',
-    }), access);
-    return (data.messages ?? []).map(row => ({ id: row.id }));
+export async function incomingMailPage(provider, access, since, through, limit, cursor = '') {
+  const google = provider === 'google';
+  const base = google ? gmail + 'messages' : graph + 'me/mailFolders/inbox/messages';
+  const url = google ? withQuery(base, {
+    labelIds: 'INBOX', q: 'after:'+(Math.floor(since.getTime()/1000)-1) + (through ? ' before:'+Math.ceil(through.getTime()/1000) : ''),
+    maxResults:limit, pageToken:cursor, fields:'messages(id),nextPageToken',
+  }) : cursor || withQuery(base, {
+    $top:limit, $select:'id,receivedDateTime', $orderby:'receivedDateTime asc',
+    $filter:'receivedDateTime ge '+since.toISOString()+(through ? ' and receivedDateTime lt '+through.toISOString() : ''),
+  });
+  if (!google && cursor) {
+    const next = new URL(cursor);
+    if (next.origin !== 'https://graph.microsoft.com' || next.username || next.password ||
+        !next.pathname.startsWith('/v1.0/') || !next.pathname.endsWith('/messages')) throw new Failure(410,'Die Mailprüfung beginnt diese Seite erneut.');
   }
-  const data = await getGraph(withQuery(graph + 'me/mailFolders/inbox/messages', {
-    $top: limit, $select: 'id,receivedDateTime', $filter: 'receivedDateTime ge ' + since.toISOString(), $orderby: 'receivedDateTime asc',
-  }), access);
-  return (data.value ?? []).map(row => ({ id: row.id, date: row.receivedDateTime }));
+  const response = await request(url, {headers:{Authorization:'Bearer '+access, ...(!google ? {Prefer:'IdType="ImmutableId"'} : {})}});
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Failure(cursor && [400,404,410].includes(response.status) ? 410 : response.status, 'Die Posteingangsseite ist gerade nicht verfügbar.');
+  }
+  const data=await response.json();
+  const rows=google ? data.messages : data.value;
+  if (rows !== undefined && !Array.isArray(rows) || !google && !Array.isArray(rows)) throw new Failure(502,'Die Posteingangsseite ist unvollständig.');
+  return { rows:(rows ?? []).map(r=>google ? {id:r.id} : {id:r.id,date:r.receivedDateTime}),
+    next:(google ? data.nextPageToken : data['@odata.nextLink']) || '' };
 }
 
 function driveQueryText(text) {
