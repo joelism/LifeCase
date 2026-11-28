@@ -187,7 +187,9 @@ export function makeWorkspace(ctx, add) {
     const cached=!['mail_search','mail_digest'].includes(cmd.operation) && !cmd.query && !cmd.from && !cmd.through && results.mail?.length;
     let hits = cached ? results.mail.filter(r=>keys.includes(r.provider) && r.account===accounts[r.provider].accountRef) : [];
     let errors=[];
-    if (!cached || !hits.length) {
+    if (cached && !hits.length) return show('Die vorherigen Treffer gehören zu einem anderen Postfach. Starte eine neue Suche.');
+    if (!cached) {
+      results.selectedMail=null;
       const responses=await Promise.allSettled(keys.map(provider=>connection('mail',{provider,query:cmd.query,account:accounts[provider].accountRef,from:cmd.from,through:cmd.through}))); guard();
       hits=responses.flatMap((r,i)=>r.status==='fulfilled' ? r.value.rows.map(row=>({...row,provider:keys[i],account:accounts[keys[i]].accountRef})) : []);
       errors=responses.flatMap((r,i)=>r.status==='rejected' ? [providerName[keys[i]]+': '+message(r.reason)] : []);
@@ -209,6 +211,7 @@ export function makeWorkspace(ctx, add) {
       guard();
       const provider=row.provider, id=row.id;
       const mail=await connection('detail',{provider,id,account:row.account}); guard();
+      results.selectedMail=row;
       const source='Absender: '+mail.sender+'\nBetreff: '+mail.subject+'\n\n'+mail.text;
       const file=()=>ctx.importAssistantMail(mail,item=>connection('file',{provider,id,attachment:item.id,account:row.account},true));
       if (cmd.operation==='mail_file') return file();
@@ -227,9 +230,11 @@ export function makeWorkspace(ctx, add) {
       return show(source,[link('Im Dossier ablegen',file)],'Eine E-Mail wurde geöffnet. Für Folgefragen ist sie im Posteingang ausgewählt.');
     };
     if (cmd.operation==='mail_search') return show((hits.length ? hits.slice(0,10).map((r,i)=>(i+1)+'. '+label(r)).join('\n') : 'Keine passenden Nachrichten gefunden.')+(errors.length?'\n'+errors.join('\n'):''),
-      hits.slice(0,10).map((r,i)=>link('Nr. '+(i+1)+' lesen',()=>{results.mail=[r];return select(r);})), 'E-Mail-Suche mit '+Math.min(10,hits.length)+' nummerierten Treffern.');
+      hits.slice(0,10).map((r,i)=>link('Nr. '+(i+1)+' lesen',()=>select(r))), 'E-Mail-Suche mit '+Math.min(10,hits.length)+' nummerierten Treffern.');
     if (errors.length && !hits.length) return show('Keine Treffer in den erreichbaren Postfächern.\n'+errors.join('\n'));
-    return chooseRow('mail',hits,label,async row=>{ results.mail=[row]; await select(row); });
+    const selected=results.selectedMail;
+    if (cached && !cmd.position && selected && hits.some(r=>r.id===selected.id && r.provider===selected.provider && r.account===selected.account)) return select(selected);
+    return chooseRow('mail',hits,label,select);
   }
 
   function mailEditor(keys,accounts,fields,replyId='') {

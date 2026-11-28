@@ -379,7 +379,7 @@ export function makeAssistant(ctx, currentAccounts) {
         button('Andere Zeit','lunch-other','','clock') + button('Nein','lunch-cancel') + '</div></div>';
     const status = aiAvailable === null ? 'OpenAI-Verbindung wird geprüft …' :
       aiAvailable === 'unreachable' ? 'LifeCase versucht die KI-Verbindung beim Senden erneut.' :
-      aiAvailable ? 'LifeCase verwendet OpenAI, um Chatnachrichten zu verstehen.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
+      aiAvailable ? 'OpenAI verarbeitet deine Chatnachricht und bei einer Auswertung die dafür ausgewählten Inhalte.' : 'OpenAI ist für dieses Konto noch nicht aktiviert.';
     const caseControls = !busy && pendingCase ? '<div class="assistant-tools" aria-label="Dossier auswählen">' +
       pendingCase.choices.slice(0, 8).map(row => button(pendingCase.review ? 'In «' + nameOf(row) + '» speichern' : nameOf(row),
         'assistant-case', row.id, 'folder', pendingCase.preferred === row.id ? 'primary' : '')).join('') +
