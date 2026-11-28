@@ -16,14 +16,14 @@ before(async()=>{
     executablePath:process.env.LIFECASE_TEST_BROWSER || undefined, args:process.env.LIFECASE_TEST_BROWSER ? ['--disable-gpu'] : []});
 });
 after(async()=>{await browser?.close();});
-const json=(route,obj,status=200)=>route.fulfill({status,contentType:'application/json',body:JSON.stringify(obj)});
+const json=(route,obj,status=200)=>route.fulfill({status,headers:{'Content-Type':'application/json; charset=utf-8','Access-Control-Allow-Origin':new URL(app).origin,'Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'GET, POST, PATCH, OPTIONS'},body:JSON.stringify(obj)});
 const baseRecord={id:'20000000-0000-4000-8000-000000000001',section:'Einkaufen',revision:1,fields:{title:'Haushalt',items:[]},
   created_at:'2026-11-28T08:00:00Z',updated_at:'2026-11-28T08:00:00Z',archived_at:null};
 async function fixture(t,installed=false) {
   const context=await browser.newContext({viewport:{width:390,height:844},timezoneId:'Europe/Zurich',serviceWorkers:'block'});
   t.after(()=>context.close());
   if (installed) await context.addInitScript(()=>{Object.defineProperty(navigator,'standalone',{value:true});});
-  let allowed=false,ready=false,logins=0,patches=0,confirmScope;
+  let allowed=false,ready=false,logins=0,refreshes=0,patches=0,confirmScope;
   let row=structuredClone(baseRecord);
   const writes=[],errors=[];
   const user={id:userId,email:account,role:'authenticated',aud:'authenticated',user_metadata:{},app_metadata:{}};
@@ -32,7 +32,7 @@ async function fixture(t,installed=false) {
     token_type:'bearer',expires_in:3600,user};
   await context.route('**/*',async route=>{
     const req=route.request(),url=new URL(req.url());
-    if (req.method()==='OPTIONS') return route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'*','Access-Control-Allow-Methods':'*'}});
+    if (req.method()==='OPTIONS') return route.fulfill({status:204,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':req.headers()['access-control-request-headers'] || '*','Access-Control-Allow-Methods':'GET, POST, PATCH, OPTIONS'}});
     if (url.origin===new URL(app).origin) {
       const name=url.pathname.replace(/^\/LifeCase\/?/,'') || 'index.html';
       if (!/^(index\.html|app\.js|styles\.css|icon-\d+\.png|manifest\.webmanifest|site-assets\/[\w.-]+)$/.test(name)) return route.abort();
@@ -40,10 +40,13 @@ async function fixture(t,installed=false) {
       return route.fulfill({body:await readFile(resolve('dist',name)),contentType});
     }
     if (url.hostname==='login.microsoftonline.com' && url.pathname==='/fixture') {
-      return route.fulfill({contentType:'text/html; charset=utf-8',body:'<a href="'+app+'?lcWindow=1&amp;lcConnection=connected">Kontofreigabe bestätigen</a>'});
+      return route.fulfill({contentType:'text/html; charset=utf-8',body:'<!doctype html><meta charset="utf-8"><a id="grant" href="'+app+'?lcWindow=1&amp;lcConnection=connected">Kontofreigabe bestätigen</a>'});
     }
     if (url.hostname!=='gmulchykvjxkbpcfnspg.supabase.co') return route.abort();
-    if (url.pathname==='/auth/v1/token') { logins++;return json(route,session); }
+    if (url.pathname==='/auth/v1/token') {
+      if (url.searchParams.get('grant_type')==='refresh_token') refreshes++; else logins++;
+      return json(route,session);
+    }
     if (url.pathname==='/auth/v1/user') return json(route,user);
     if (url.pathname==='/rest/v1/lifecase_records'){
       const single=url.searchParams.has('id');
@@ -90,7 +93,7 @@ async function fixture(t,installed=false) {
     await page.getByRole('textbox',{name:'Deine Nachricht'}).fill(text);
     await page.getByRole('button',{name:'Nachricht senden'}).click();
   };
-  return {page,context,writes,errors,ask,get row(){return row;},get logins(){return logins;},get patches(){return patches;},
+  return {page,context,writes,errors,ask,get row(){return row;},get logins(){return logins;},get refreshes(){return refreshes;},get patches(){return patches;},
     grant:()=>{assert.equal(ready,true);assert.equal(confirmScope.separateWindow,true);allowed=true;}};
 }
 test('shared iPhone-sized browser tab keeps its draft and login through provider consent',async t=>{
@@ -101,7 +104,7 @@ test('shared iPhone-sized browser tab keeps its draft and login through provider
   const newTab=f.context.waitForEvent('page');
   await f.page.getByRole('button',{name:'Entwürfe erlauben'}).click();
   const provider=await newTab;
-  const allow=provider.getByText('Kontofreigabe bestätigen');
+  const allow=provider.locator('#grant');
   await allow.waitFor(); f.grant(); await allow.click();
   await f.page.bringToFront();
   const save=f.page.getByRole('button',{name:'Im Postfach speichern'});
@@ -111,10 +114,16 @@ test('shared iPhone-sized browser tab keeps its draft and login through provider
   assert.equal(f.writes[0].body,'Mein korrigierter Text bleibt erhalten.');assert.equal(f.writes[0].to,'person@example.org');assert.deepEqual(f.errors,[]);
 });
 
-test('installed-mode reload restores the session and simultaneous shopping changes survive retry',async t=>{
+test('installed-mode reload renews an expired session and simultaneous shopping changes survive retry',async t=>{
   const f=await fixture(t,true);
+  await f.page.evaluate(()=>{
+    const key='lifecase-auth-v1';
+    const stored=JSON.parse(localStorage.getItem(key));
+    stored.expires_at=Math.floor(Date.now()/1000)-300;
+    localStorage.setItem(key,JSON.stringify(stored));
+  });
   await f.page.reload();await f.page.locator('[data-assistant]').first().waitFor();
-  assert.equal(f.logins,1);
+  assert.equal(f.logins,1);assert.ok(f.refreshes>=1);
   await f.ask('Setze Milch und Brot auf meine Einkaufsliste.');
   await f.page.getByText('auf der Liste.',{exact:false}).waitFor();
   assert.equal(f.patches,2);assert.deepEqual(f.row.fields.items.map(i=>i.name),['Eier','Milch','Brot']);
